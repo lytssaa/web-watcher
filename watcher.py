@@ -437,21 +437,23 @@ def compare_snapshots(old: dict, new: dict) -> tuple:
 # ── 邮件生成 ──────────────────────────────────────────
 
 def format_item_html(item: dict) -> str:
-    """格式化一条新闻为漂亮的 HTML 块"""
+    """格式化一条新闻为漂亮的 HTML 块（标题→来源→时间）"""
     parts = []
 
-    # 时间 + 来源 + 评分
-    header_parts = []
-    if item.get("time"):
-        header_parts.append(f'<span style="color:#888; font-weight:bold;">{html_mod.escape(item["time"])}</span>')
-    if item.get("source"):
-        header_parts.append(f'<span style="color:#555;">{html_mod.escape(item["source"])}</span>')
-    if header_parts:
-        parts.append(f'<div style="font-size:13px; margin-bottom:4px;">{" ".join(header_parts)}</div>')
-
-    # 标题
+    # 标题（放在最上面）
     if item.get("title"):
-        parts.append(f'<div style="font-size:16px; font-weight:bold; color:#222; margin-bottom:6px; line-height:1.4;">{html_mod.escape(item["title"])}</div>')
+        parts.append(f'<div style="font-size:16px; font-weight:bold; color:#222; margin-bottom:4px; line-height:1.4;">{html_mod.escape(item["title"])}</div>')
+
+    # 来源
+    source_parts = []
+    if item.get("source"):
+        source_parts.append(f'<span style="color:#555; font-size:13px;">{html_mod.escape(item["source"])}</span>')
+    if source_parts:
+        parts.append(f'<div style="margin-bottom:2px;">{" ".join(source_parts)}</div>')
+
+    # 时间
+    if item.get("time"):
+        parts.append(f'<div style="font-size:12px; color:#999; margin-bottom:6px;">{html_mod.escape(item["time"])}</div>')
 
     # AI 摘要
     if item.get("summary"):
@@ -865,7 +867,7 @@ def check_once(config: dict) -> bool:
     diff_email = build_change_email(all_items, [], url)
 
     try:
-        send_email(config, diff_email)
+        send_email(config, diff_email, "AI 热点新闻 — 今日更新")
         print("邮件已发送到:", ", ".join(config["recipients"]))
         return True
     except smtplib.SMTPAuthenticationError:
