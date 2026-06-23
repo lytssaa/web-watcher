@@ -122,7 +122,7 @@ def parse_gitcn_items(html_text: str, now_ts: str) -> list:
         desc_m = re.search(r'class="text-\[\#59636e\][^"]*text-sm"[^>]*>(.*?)</div>', block, re.DOTALL)
         desc = re.sub(r'<[^>]+>', '', desc_m.group(1)).strip() if desc_m else ""
 
-        stars_m = re.search(r'(\d+\.?\d*)\s*k', block)
+        stars_m = re.search(r'octicon-star[^>]*>.*?</svg>\s*<!--\s*-->\s*([\d.]+)\s*k', block, re.DOTALL)
         stars = int(float(stars_m.group(1)) * 1000) if stars_m else 0
         star_str = f"{stars_m.group(1)}k" if stars_m else "0"
 
