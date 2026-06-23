@@ -681,12 +681,15 @@ def build_api_email(items: list, url: str) -> str:
 
 # ── 邮件发送 ──────────────────────────────────────────
 
-def send_email(config: dict, html_body: str):
+def send_email(config: dict, html_body: str, subject: str = None):
     msg = email.mime.text.MIMEText(html_body, "html", "utf-8")
-    msg["Subject"] = (
-        f"[通知] 网页变化通知 — {config['target_url']}"
-        f" — {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    )
+    if subject:
+        msg["Subject"] = subject
+    else:
+        msg["Subject"] = (
+            f"[通知] 网页变化通知 — {config['target_url']}"
+            f" — {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        )
     msg["From"] = config["smtp_user"]
     msg["To"] = ", ".join(config["recipients"])
 
@@ -784,7 +787,7 @@ def check_once(config: dict) -> bool:
         body = build_api_email(to_send, url)
         print(f"  正在发送邮件，共 {len(to_send)} 条...")
         try:
-            send_email(config, body)
+            send_email(config, body, "AI 开源雷达 — 今日更新")
             print("  邮件已发送")
             return True
         except Exception as e:
