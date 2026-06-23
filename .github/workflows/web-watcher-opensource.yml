@@ -2,7 +2,8 @@ name: Web Watcher - 开源雷达
 
 on:
   schedule:
-    - cron: '0 */4 * * *'
+    # UTC 12:00 = 北京时间 20:00，每天晚 8 点扫描开源雷达
+    - cron: '0 12 * * *'
   workflow_dispatch:
 
 jobs:
@@ -33,6 +34,7 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           RECIPIENT: ${{ secrets.RECIPIENT }}
-          TARGET_URL: https://aihot.instantech.cn/
+          TARGET_URL: https://aihot.instantech.cn/api/news/open-source-radar?limit=16
           SNAPSHOT_FILE: snapshot_os.json
+          API_TYPE: true
         run: python run_github.py

@@ -37,6 +37,56 @@ def fetch_page(url: str) -> str:
     return resp.text
 
 
+def fetch_opensource_api(url: str) -> list:
+    """
+    调用 AI 开源雷达 JSON API，返回项目列表。
+    异常时抛出可读错误，日志输出详细信息。
+    """
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/138.0.0.0 Safari/537.36 QQBrowser/21.3.8983.400"
+        ),
+        "Referer": "https://aihot.instantech.cn/",
+        "Accept": "*/*",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+    except requests.Timeout:
+        raise RuntimeError(f"API 请求超时: {url}")
+    except requests.ConnectionError as e:
+        raise RuntimeError(f"API 连接失败: {e}\n  完整 curl: curl -v '{url}' -H 'User-Agent: ...'")
+    except Exception as e:
+        raise RuntimeError(f"API 请求异常: {e}")
+
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"API 返回非 200 状态码: {resp.status_code}\n"
+            f"  响应体预览: {resp.text[:300]}"
+        )
+
+    try:
+        data = resp.json()
+    except Exception as e:
+        raise RuntimeError(
+            f"API JSON 解析失败: {e}\n"
+            f"  响应体预览: {resp.text[:300]}"
+        )
+
+    if data.get("code") != 200:
+        raise RuntimeError(
+            f"API 业务状态码异常: {data.get('code')}, msg: {data.get('msg')}\n"
+            f"  完整响应: {json.dumps(data, ensure_ascii=False)[:500]}"
+        )
+
+    items = data.get("data", [])
+    if not isinstance(items, list):
+        raise RuntimeError(f"API 返回 data 不是数组: {type(items)}")
+    return items
+
+
 # ── 页面解析 ──────────────────────────────────────────
 
 def parse_news_items(html_text: str) -> list:
@@ -88,7 +138,50 @@ def parse_news_items(html_text: str) -> list:
     return items
 
 
-def _parse_one_item(block: str) -> dict:
+def parse_opensource_items(api_data: list, now_ts: str) -> list:
+    """
+    将开源雷达 API 返回的 JSON 数据转为统一 item 格式。
+    api_data: fetch_opensource_api 返回的 data 数组
+    """
+    items = []
+    for obj in api_data:
+        repo = obj.get("repo", "")
+        if not repo:
+            continue
+
+        # Star 数格式化
+        stars = obj.get("stars", 0)
+        if stars >= 1000:
+            score_str = f"{stars // 1000}K"
+        else:
+            score_str = str(stars)
+
+        desc = obj.get("desc", "")
+        tags = obj.get("tags", [])
+
+        item = {
+            "id": repo,                     # 唯一标识
+            "title": repo,                  # 仓库名
+            "source": "开源项目",
+            "score": score_str,
+            "raw_score": stars,
+            "desc": desc,
+            "tags": tags,
+            "category": obj.get("category", ""),
+            "full_time": now_ts,
+            "url": f"https://github.com/{repo}",
+        }
+
+        # 构建哈希用于去重
+        raw = f"{repo} | {stars} | {desc} | {' '.join(tags)}"
+        item["hash"] = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        item["raw_text"] = raw
+        items.append(item)
+
+    return items
+
+
+# ── item 解析（单个 HTML） ────────────────────────────
     """解析一个 timeline-item"""
     item = {}
 
@@ -336,6 +429,75 @@ def format_item_html(item: dict) -> str:
     return '<div style="padding:12px 0; border-bottom:1px solid #eee;">' + "\n".join(parts) + "</div>"
 
 
+def format_opensource_item(item: dict) -> str:
+    """格式化开源项目为卡片风格 HTML，还原原站排版"""
+    parts = []
+
+    # 顶栏：左侧标签 + 右侧 Star 数
+    top = (
+        f'<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">'
+        f'<span style="display:inline-block; background:#e3f2fd; color:#1976d2; font-size:12px; '
+        f'padding:2px 8px; border-radius:10px; font-weight:bold;">开源项目</span>'
+    )
+    if item.get("score"):
+        star_color = "#e8a838"
+        top += (
+            f'<span style="color:#666; font-size:13px;">'
+            f'<span style="color:{star_color};">★</span> '
+            f'{html_mod.escape(item["score"])}</span>'
+        )
+    top += "</div>"
+    parts.append(top)
+
+    # 仓库名（大号粗体）
+    if item.get("title"):
+        parts.append(
+            f'<div style="font-size:16px; font-weight:bold; color:#222; '
+            f'margin-bottom:6px; line-height:1.4;">'
+            f'{html_mod.escape(item["title"])}</div>'
+        )
+
+    # 项目描述（截断防撑爆）
+    desc = item.get("desc", "")
+    if desc:
+        if len(desc) > 200:
+            desc = desc[:200] + "…"
+        parts.append(
+            f'<div style="font-size:14px; color:#444; line-height:1.6; '
+            f'margin-bottom:6px;">{html_mod.escape(desc)}</div>'
+        )
+
+    # 标签
+    if item.get("tags"):
+        tags_html = " ".join(
+            f'<span style="display:inline-block; background:#e8e8e8; color:#555; '
+            f'font-size:12px; padding:1px 8px; border-radius:10px; margin-right:4px; '
+            f'margin-bottom:4px;">{html_mod.escape(t)}</span>'
+            for t in item["tags"]
+        )
+        parts.append(f'<div style="margin-bottom:4px;">{tags_html}</div>')
+
+    # 分类标签
+    if item.get("category"):
+        parts.append(
+            f'<div style="margin-bottom:4px;">'
+            f'<span style="display:inline-block; background:#f3e5f5; color:#7b1fa2; '
+            f'font-size:11px; padding:1px 6px; border-radius:4px;">'
+            f'{html_mod.escape(item["category"])}</span></div>'
+        )
+
+    # 阅读原文 → GitHub 链接
+    if item.get("url"):
+        parts.append(
+            f'<div style="margin-top:2px;">'
+            f'<a href="{html_mod.escape(item["url"])}" '
+            f'style="color:#1976d2; font-size:13px; text-decoration:none;">'
+            f'在 GitHub 查看 &rarr;</a></div>'
+        )
+
+    return '<div style="padding:14px 0; border-bottom:1px solid #eee;">' + "\n".join(parts) + "</div>"
+
+
 def build_change_email(added: list, removed: list, url: str) -> str:
     """构建变化通知 HTML 邮件（仅显示新增条目）"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -389,6 +551,56 @@ def build_change_email(added: list, removed: list, url: str) -> str:
 
 <p style="color:#999; font-size:12px; margin:16px 0 0 0; text-align:center;">
   每 60 分钟检查一次 | Web Watcher 自动发送
+</p>
+
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+    return html_email
+
+
+def build_api_email(items: list, url: str) -> str:
+    """构建开源雷达卡片风格邮件"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    content_parts = [
+        f'<p style="font-size:16px; font-weight:bold; color:#2e7d32; margin:12px 0 6px 0;">'
+        f'&#x25B2; 今日开源项目（{len(items)} 个）</p>'
+    ]
+    for item in items:
+        content_parts.append(format_opensource_item(item))
+
+    html_email = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"></head>
+<body style="margin:0; padding:0; background:#f5f5f5;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;">
+<tr><td align="center" style="padding:20px 10px;">
+<table width="100%" style="max-width:640px; background:#fff; border-radius:8px;">
+<tr><td style="padding:20px 24px;">
+
+<div style="font-size:20px; font-weight:bold; color:#d32f2f; margin-bottom:12px;">
+  &#x1F680; AI 开源雷达 — 今日更新
+</div>
+
+<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:12px; font-size:14px; color:#888;">
+<tr><td style="padding:3px 0; width:60px;" valign="top">来源</td>
+    <td style="padding:3px 0;">GitHub Trending</td></tr>
+<tr><td style="padding:3px 0;">时间</td>
+    <td style="padding:3px 0;">{timestamp}</td></tr>
+</table>
+
+<hr style="border:none; border-top:1px solid #e0e0e0; margin:12px 0;">
+
+{"".join(content_parts)}
+
+<hr style="border:none; border-top:1px solid #e0e0e0; margin:12px 0;">
+
+<p style="color:#999; font-size:12px; margin:16px 0 0 0; text-align:center;">
+  每天 20:00 自动推送 | Web Watcher
 </p>
 
 </td></tr>
@@ -461,8 +673,54 @@ def interactive_setup() -> dict:
 def check_once(config: dict) -> bool:
     """执行一次抓取→解析→按时间过滤→通知流程"""
     url = config["target_url"]
-    max_pages = config.get("max_pages", 10)
-    
+    now_ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+    # ── API 模式（开源雷达 JSON API） ──
+    if config.get("api_type"):
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在调用 API: {url} ...")
+        try:
+            api_data = fetch_opensource_api(url)
+        except RuntimeError as e:
+            print(f"  API 请求失败: {e}")
+            return False
+
+        items = parse_opensource_items(api_data, now_ts)
+        print(f"  API 返回 {len(items)} 个项目")
+
+        # 加载旧快照
+        old_snapshot = load_json(SNAPSHOT_FILE)
+
+        # 构建新快照
+        new_snapshot = make_snapshot(items)
+        new_snapshot["checked_at"] = now_ts
+        save_json(SNAPSHOT_FILE, new_snapshot)
+
+        if old_snapshot is None:
+            # 首次运行，发全部
+            to_send = items
+            print(f"  [首次] 准备发送全部 {len(to_send)} 条")
+        else:
+            # 对比 repo 维度的新增
+            added, _ = compare_snapshots(old_snapshot, new_snapshot)
+            to_send = added
+            print(f"  [增量] 新增 {len(to_send)} 条")
+
+        if not to_send:
+            print("  无新增项目")
+            return False
+
+        # 构建邮件
+        body = build_api_email(to_send, url)
+        print(f"  正在发送邮件，共 {len(to_send)} 条...")
+        try:
+            send_email(config, body)
+            print("  邮件已发送")
+            return True
+        except Exception as e:
+            print(f"  发送失败: {e}")
+            return False
+
+    # ── HTML 模式（原有爬虫逻辑） ──
     print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在抓取 {url} ...")
 
     # 加载旧快照，获取上次检查时间

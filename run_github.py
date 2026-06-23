@@ -49,6 +49,10 @@ def main():
             print(f"  - {e}")
         sys.exit(1)
 
+    # 可选环境变量
+    if os.environ.get("API_TYPE") == "true":
+        config["api_type"] = True
+
     # 写入 config.json
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
