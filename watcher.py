@@ -13,9 +13,16 @@ import os
 import sys
 import re
 import html as html_mod
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import requests
+
+# 北京时间 (UTC+8)
+BJT = timezone(timedelta(hours=8))
+
+def now_bj() -> datetime:
+    """返回当前北京时间"""
+    return datetime.now(BJT)
 
 CONFIG_FILE = "config.json"
 SNAPSHOT_FILE = "snapshot.json"
@@ -569,7 +576,7 @@ def format_opensource_item(item: dict) -> str:
 
 def build_change_email(added: list, removed: list, url: str) -> str:
     """构建变化通知 HTML 邮件（仅显示新增条目）"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = now_bj().strftime("%Y-%m-%d %H:%M")
 
     content_parts = []
 
@@ -633,7 +640,7 @@ def build_change_email(added: list, removed: list, url: str) -> str:
 
 def build_api_email(items: list, url: str) -> str:
     """构建开源雷达卡片风格邮件"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = now_bj().strftime("%Y-%m-%d %H:%M")
 
     content_parts = [
         f'<p style="font-size:16px; font-weight:bold; color:#2e7d32; margin:12px 0 6px 0;">'
@@ -690,7 +697,7 @@ def send_email(config: dict, html_body: str, subject: str = None):
     else:
         msg["Subject"] = (
             f"[通知] 网页变化通知 — {config['target_url']}"
-            f" — {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            f" — {now_bj().strftime('%Y-%m-%d %H:%M')}"
         )
     msg["From"] = config["smtp_user"]
     msg["To"] = ", ".join(config["recipients"])
@@ -704,10 +711,10 @@ def send_email(config: dict, html_body: str, subject: str = None):
 def send_simple_notification(config: dict):
     msg = email.mime.text.MIMEText(
         f"网页内容已更新，请检查：{config['target_url']}\n"
-        f"检测时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"检测时间：{now_bj().strftime('%Y-%m-%d %H:%M')}",
         "plain", "utf-8"
     )
-    msg["Subject"] = f"网页变化通知 — {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    msg["Subject"] = f"网页变化通知 — {now_bj().strftime('%Y-%m-%d %H:%M')}"
     msg["From"] = config["smtp_user"]
     msg["To"] = ", ".join(config["recipients"])
 
