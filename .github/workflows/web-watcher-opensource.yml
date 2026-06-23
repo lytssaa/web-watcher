@@ -34,7 +34,7 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           RECIPIENT: ${{ secrets.RECIPIENT }}
-          TARGET_URL: https://aihot.instantech.cn/api/news/open-source-radar?limit=16
+          TARGET_URL: https://gitcn.org/trending
           SNAPSHOT_FILE: snapshot_os.json
           API_TYPE: true
         run: python run_github.py

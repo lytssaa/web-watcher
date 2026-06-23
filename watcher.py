@@ -39,9 +39,19 @@ def fetch_page(url: str) -> str:
 
 def fetch_opensource_api(url: str) -> list:
     """
-    调用 AI 开源雷达 JSON API，返回项目列表。
-    用 curl 命令绕过 TLS 指纹检测。
+    获取开源项目列表。
+    - gitcn.org：直接用 requests 抓 HTML 解析（该站无 Cloudflare 防护）
+    - 其他站：用 curl + cloudscraper 回退
     """
+    if "gitcn.org" in url:
+        import requests as _rq
+        resp = _rq.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+        if resp.status_code != 200:
+            raise RuntimeError(f"gitcn 返回 {resp.status_code}")
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        return parse_gitcn_items(resp.text, now)
+
+    # 以下为原有逻辑（用于 aiho.instantech.cn 等 Cloudflare 防护站）
     import subprocess
     headers = [
         "-H 'Accept: */*'",
@@ -64,7 +74,6 @@ def fetch_opensource_api(url: str) -> list:
         raise RuntimeError(f"curl 超时: {url}")
 
     if result.returncode != 0 or not result.stdout:
-        # curl 失败，尝试 cloudscraper 回退
         print(f"  curl 失败 (code={result.returncode})，尝试 cloudscraper...")
         try:
             import cloudscraper
@@ -74,8 +83,6 @@ def fetch_opensource_api(url: str) -> list:
             import requests as _rq
             resp = _rq.get(url, headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36 QQBrowser/21.3.8983.400",
-                "Referer": "https://aihot.instantech.cn/",
-                "Accept": "*/*",
             }, timeout=30)
         except Exception as e:
             raise RuntimeError(f"回退也失败: {e}")
@@ -93,6 +100,56 @@ def fetch_opensource_api(url: str) -> list:
     items = data.get("data", [])
     if not isinstance(items, list):
         raise RuntimeError(f"data 不是数组: {type(items)}")
+    return items
+
+
+def parse_gitcn_items(html_text: str, now_ts: str) -> list:
+    """从 gitcn.org/trending HTML 中提取开源项目列表"""
+    items = []
+    blocks = re.findall(r'<div[^>]*class="[^"]*repo-item[^"]*"[^>]*>.*?</div>\s*</div>\s*</div>', html_text, re.DOTALL)
+
+    for block in blocks:
+        name_m = re.search(r'<span class="font-medium">([^<]+)</span>\s*/\s*<!--\s*-->\s*([^<]+)', block)
+        if not name_m:
+            continue
+        owner = name_m.group(1).strip()
+        repo_name = name_m.group(2).strip()
+        repo_full = f"{owner}/{repo_name}"
+
+        url_m = re.search(r'href="(https://github\.com/[^"]+)"', block)
+        gh_url = url_m.group(1) if url_m else f"https://github.com/{repo_full}"
+
+        desc_m = re.search(r'class="text-\[\#59636e\][^"]*text-sm"[^>]*>(.*?)</div>', block, re.DOTALL)
+        desc = re.sub(r'<[^>]+>', '', desc_m.group(1)).strip() if desc_m else ""
+
+        stars_m = re.search(r'(\d+\.?\d*)\s*k', block)
+        stars = int(float(stars_m.group(1)) * 1000) if stars_m else 0
+        star_str = f"{stars_m.group(1)}k" if stars_m else "0"
+
+        lang_m = re.search(r'class="point"[^>]*></span>\s*<!--\s*-->\s*([^<]+)', block)
+        lang = lang_m.group(1).strip() if lang_m else ""
+
+        tags = re.findall(r'class="topic-tag[^"]*"[^>]*>([^<]+)', block)
+        tags = [t.strip() for t in tags if t.strip()]
+
+        item = {
+            "id": repo_full,
+            "title": repo_full,
+            "source": "GitHub Trending",
+            "score": star_str,
+            "raw_score": stars,
+            "desc": desc,
+            "tags": tags,
+            "language": lang,
+            "full_time": now_ts,
+            "url": gh_url,
+            "category": "开源项目",
+        }
+        raw = f"{repo_full} | {stars} | {desc}"
+        item["hash"] = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        item["raw_text"] = raw
+        items.append(item)
+
     return items
 
 
