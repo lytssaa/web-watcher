@@ -23,7 +23,7 @@ jobs:
       - name: Restore snapshot cache
         uses: actions/cache@v4
         with:
-          path: web-watcher/snapshot.json
+          path: snapshot.json
           key: web-watcher-snapshot
           restore-keys: web-watcher-snapshot
 
@@ -35,4 +35,4 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           RECIPIENT: ${{ secrets.RECIPIENT }}
           TARGET_URL: ${{ secrets.TARGET_URL }}
-        run: cd web-watcher && python run_github.py
+        run: python run_github.py
