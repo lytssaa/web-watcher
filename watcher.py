@@ -279,8 +279,6 @@ def format_item_html(item: dict) -> str:
     # AI 摘要
     if item.get("summary"):
         summary = item["summary"]
-        if len(summary) > 600:
-            summary = summary[:600] + "..."
         parts.append(
             f'<div style="font-size:14px; color:#444; line-height:1.6; margin-bottom:6px; '
             f'background:#f0f7ff; border-left:3px solid #1976d2; padding:6px 10px; border-radius:2px;">'
@@ -290,15 +288,11 @@ def format_item_html(item: dict) -> str:
     # 正文（desc / body 作为补充）
     body_text = item.get("desc") or item.get("body") or ""
     if body_text:
-        if len(body_text) > 500:
-            body_text = body_text[:500] + "..."
         parts.append(f'<div style="font-size:14px; color:#444; line-height:1.6; margin-bottom:4px;">{html_mod.escape(body_text)}</div>')
 
     # 推荐理由
     if item.get("reason"):
         reason = item["reason"]
-        if len(reason) > 300:
-            reason = reason[:300] + "..."
         parts.append(
             f'<div style="font-size:13px; color:#666; margin-bottom:6px; '
             f'background:#fff8e1; border-left:3px solid #ff8f00; padding:4px 10px; border-radius:2px;">'
