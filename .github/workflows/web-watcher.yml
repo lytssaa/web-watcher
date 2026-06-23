@@ -1,0 +1,38 @@
+name: Web Watcher
+
+on:
+  schedule:
+    # 每整点运行一次（UTC），北京时间每小时一次
+    - cron: '0 * * * *'
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Restore snapshot cache
+        uses: actions/cache@v4
+        with:
+          path: web-watcher/snapshot.json
+          key: web-watcher-snapshot
+          restore-keys: web-watcher-snapshot
+
+      - name: Run watcher
+        env:
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          RECIPIENT: ${{ secrets.RECIPIENT }}
+          TARGET_URL: ${{ secrets.TARGET_URL }}
+        run: cd web-watcher && python run_github.py

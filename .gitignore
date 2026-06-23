@@ -1,0 +1,6 @@
+# Web Watcher
+
+config.json
+snapshot.json
+*.pyc
+__pycache__/
