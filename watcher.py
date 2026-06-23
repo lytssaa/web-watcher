@@ -40,38 +40,56 @@ def fetch_page(url: str) -> str:
 def fetch_opensource_api(url: str) -> list:
     """
     调用 AI 开源雷达 JSON API，返回项目列表。
-    用 cloudscraper 绕过 Cloudflare 防护。
+    用 curl 命令绕过 TLS 指纹检测。
     """
-    try:
-        import cloudscraper
-        scraper = cloudscraper.create_scraper(browser={"browser": "chrome", "platform": "windows", "mobile": False})
-        resp = scraper.get(url, timeout=30)
-    except ImportError:
-        # 没有 cloudscraper，用 requests + 完整浏览器头
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 QQBrowser/21.3.8983.400",
-            "Accept": "*/*",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-            "Referer": "https://aihot.instantech.cn/",
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-origin",
-        }
-        resp = requests.get(url, headers=headers, timeout=30)
-    except Exception as e:
-        raise RuntimeError(f"API 请求失败: {e}")
-
-    if resp.status_code != 200:
-        raise RuntimeError(f"API 返回 {resp.status_code}: {resp.text[:300]}")
+    import subprocess
+    headers = [
+        "-H 'Accept: */*'",
+        "-H 'Accept-Language: zh-CN,zh;q=0.9'",
+        "-H 'Referer: https://aihot.instantech.cn/'",
+        "-H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 QQBrowser/21.3.8983.400'",
+        "-H 'Sec-Fetch-Dest: empty'",
+        "-H 'Sec-Fetch-Mode: cors'",
+        "-H 'Sec-Fetch-Site: same-origin'",
+        "-H 'sec-ch-ua: \"Not)A;Brand\";v=\"8\", \"Chromium\";v=\"138\"'",
+        "-H 'sec-ch-ua-mobile: ?0'",
+        "-H 'sec-ch-ua-platform: \"Windows\"'",
+    ]
+    h = " ".join(headers)
+    cmd = f"curl -s --connect-timeout 20 --max-time 30 {h} '{url}'"
 
     try:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=35)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"curl 超时: {url}")
+
+    if result.returncode != 0 or not result.stdout:
+        # curl 失败，尝试 cloudscraper 回退
+        print(f"  curl 失败 (code={result.returncode})，尝试 cloudscraper...")
+        try:
+            import cloudscraper
+            scraper = cloudscraper.create_scraper(browser={"browser": "chrome", "platform": "windows", "mobile": False})
+            resp = scraper.get(url, timeout=30)
+        except ImportError:
+            import requests as _rq
+            resp = _rq.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36 QQBrowser/21.3.8983.400",
+                "Referer": "https://aihot.instantech.cn/",
+                "Accept": "*/*",
+            }, timeout=30)
+        except Exception as e:
+            raise RuntimeError(f"回退也失败: {e}")
+        if resp.status_code != 200:
+            raise RuntimeError(f"回退返回 {resp.status_code}: {resp.text[:200]}")
         data = resp.json()
-    except Exception as e:
-        raise RuntimeError(f"JSON 解析失败: {e}, 响应: {resp.text[:300]}")
+    else:
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"curl JSON 解析失败: {e}, 输出: {result.stdout[:300]}")
 
     if data.get("code") != 200:
         raise RuntimeError(f"API 业务码异常: {data.get('code')}, msg: {data.get('msg')}")
-
     items = data.get("data", [])
     if not isinstance(items, list):
         raise RuntimeError(f"data 不是数组: {type(items)}")
