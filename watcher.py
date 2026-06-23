@@ -42,9 +42,21 @@ def fetch_page(url: str) -> str:
 def parse_news_items(html_text: str) -> list:
     """
     从 HTML 中提取所有新闻条目。
-    每个条目是一个 dict: {id, time, source, score, title, desc, reason, tags, raw_text}
+    同时解析页面中的日期（如 6月23日）。
     """
     items = []
+
+    # 提取页面中的日期（在 m-daybar-sub 或类似元素中）
+    page_date = None
+    date_m = re.search(r'(\d{1,2})月(\d{1,2})日', html_text)
+    if date_m:
+        month, day = int(date_m.group(1)), int(date_m.group(2))
+        # 假设当前年份
+        year = datetime.now().year
+        page_date = f"{year}-{month:02d}-{day:02d}"
+    else:
+        # 没有找到日期，用今天
+        page_date = datetime.now().strftime("%Y-%m-%d")
 
     # 找到每个 timeline-item
     item_blocks = re.findall(
@@ -55,6 +67,9 @@ def parse_news_items(html_text: str) -> list:
     for block in item_blocks:
         item = _parse_one_item(block)
         if item and item.get("raw_text"):
+            # 补充完整时间戳
+            if item.get("time") and page_date:
+                item["full_time"] = f"{page_date}T{item['time']}:00"
             items.append(item)
 
     # 如果 timeline 方式没找到，回退到 m-row 方式
@@ -66,6 +81,8 @@ def parse_news_items(html_text: str) -> list:
         for block in row_blocks:
             item = _parse_one_row(block)
             if item and item.get("raw_text"):
+                if item.get("time") and page_date:
+                    item["full_time"] = f"{page_date}T{item['time']}:00"
                 items.append(item)
 
     return items
@@ -442,84 +459,87 @@ def interactive_setup() -> dict:
 # ── 主流程 ──────────────────────────────────────────
 
 def check_once(config: dict) -> bool:
-    """执行一次抓取→解析→对比→通知流程（支持多页爬取）"""
+    """执行一次抓取→解析→按时间过滤→通知流程"""
     url = config["target_url"]
-    max_pages = config.get("max_pages", 3)
+    max_pages = config.get("max_pages", 10)
     
     print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在抓取 {url} ...")
 
-    # 分离基础 URL 和已有参数
+    # 加载旧快照，获取上次检查时间
+    old_snapshot = load_json(SNAPSHOT_FILE)
+    since_time = None
+    if old_snapshot and "checked_at" in old_snapshot:
+        since_time = old_snapshot["checked_at"]
+        print(f"  上次检查时间: {since_time}")
+
+    # 分离基础 URL
     base_url = url.split("?")[0]
-    
+    now_ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
     all_items = []
     seen_ids = set()
-    
+    hit_old_content = False  # 遇到旧内容就停
+
     for page in range(1, max_pages + 1):
+        if hit_old_content:
+            print(f"  已遇到旧内容，停止翻页")
+            break
+
         page_url = f"{base_url}?page={page}"
         try:
             html = fetch_page(page_url)
         except Exception as e:
             print(f"  第{page}页抓取失败: {e}")
             continue
-        
+
         items = parse_news_items(html)
-        # 去重
-        new_count = 0
+
+        new_in_page = 0
         for item in items:
             iid = item.get("id")
-            if iid and iid not in seen_ids:
+            # 去重
+            if iid and iid in seen_ids:
+                continue
+            if iid:
                 seen_ids.add(iid)
-                all_items.append(item)
-                new_count += 1
-            elif not iid:
-                all_items.append(item)
-                new_count += 1
-        
-        print(f"  第{page}页: {len(items)} 条（新增 {new_count} 条）")
-        
-        # 如果这页没有新条目，说明已经到头
-        if new_count == 0:
-            break
-    
-    print(f"  共 {len(all_items)} 条去重后条目")
 
-    # 构建新快照
+            # 按时间过滤
+            ft = item.get("full_time")
+            if since_time and ft:
+                if ft <= since_time:
+                    # 遇到旧内容，后面的更旧，停止
+                    hit_old_content = True
+                    break
+
+            all_items.append(item)
+            new_in_page += 1
+
+        print(f"  第{page}页: {len(items)} 条（新 {new_in_page} 条）")
+
+    print(f"  共 {len(all_items)} 条新增条目")
+
+    # 构建新快照（包含本次检查时间）
     new_snapshot = make_snapshot(all_items)
-
-    # 加载旧快照
-    old_snapshot = load_json(SNAPSHOT_FILE)
-
-    # 保存快照
+    new_snapshot["checked_at"] = now_ts
     save_json(SNAPSHOT_FILE, new_snapshot)
 
-    if old_snapshot is None:
-        # 首次运行 — 也发邮件（全部内容）
-        print(f"[快照] 首次抓取完成，快照已保存，准备发送全部 {len(all_items)} 条...")
-        added = all_items
-    else:
-        # 对比
-        added, removed = compare_snapshots(old_snapshot, new_snapshot)
-        if not added:
-            print("内容未变化")
-            return False
-        print(f"[变化] 发现 {len(added)} 条新增")
+    if not all_items:
+        print("无新增内容")
+        return False
 
     # 发送邮件
-    print(f"正在发送邮件，共 {len(added)} 条...")
-    diff_email = build_change_email(added, [], url)
+    print(f"正在发送邮件，共 {len(all_items)} 条...")
+    diff_email = build_change_email(all_items, [], url)
 
     try:
         send_email(config, diff_email)
         print("邮件已发送到:", ", ".join(config["recipients"]))
         return True
     except smtplib.SMTPAuthenticationError:
-        print("邮件认证失败，请检查邮箱和应用专用密码")
-        return False
-    except smtplib.SMTPException as e:
-        print(f"SMTP 错误: {e}")
+        print("邮件认证失败")
         return False
     except Exception as e:
-        print(f"未知错误: {e}")
+        print(f"发送失败: {e}")
         return False
 
 
