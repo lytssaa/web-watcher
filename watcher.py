@@ -751,7 +751,11 @@ def check_once(config: dict) -> bool:
             print(f"  API 请求失败: {e}")
             return False
 
-        items = parse_opensource_items(api_data, now_ts)
+        # 如果数据已经是统一格式（来自 gitcn.org 等 HTML 解析），跳过二次解析
+        if api_data and "title" in api_data[0]:
+            items = api_data
+        else:
+            items = parse_opensource_items(api_data, now_ts)
         print(f"  API 返回 {len(items)} 个项目")
 
         # 加载旧快照
