@@ -489,25 +489,24 @@ def check_once(config: dict) -> bool:
     # 加载旧快照
     old_snapshot = load_json(SNAPSHOT_FILE)
 
-    if old_snapshot is None:
-        # 首次运行
-        save_json(SNAPSHOT_FILE, new_snapshot)
-        print("[快照] 首次抓取完成，快照已保存（未发送邮件）")
-        return False
-
-    # 对比
-    added, removed = compare_snapshots(old_snapshot, new_snapshot)
-
-    if not added and not removed:
-        print("内容未变化")
-        return False
-
-    # 有变化！发送邮件
-    print(f"[变化] 发现 {len(added)} 条新增, {len(removed)} 条消失，正在发送邮件...")
-    diff_email = build_change_email(added, removed, url)
-
-    # 保存新快照
+    # 保存快照
     save_json(SNAPSHOT_FILE, new_snapshot)
+
+    if old_snapshot is None:
+        # 首次运行 — 也发邮件（全部内容）
+        print(f"[快照] 首次抓取完成，快照已保存，准备发送全部 {len(all_items)} 条...")
+        added = all_items
+    else:
+        # 对比
+        added, removed = compare_snapshots(old_snapshot, new_snapshot)
+        if not added:
+            print("内容未变化")
+            return False
+        print(f"[变化] 发现 {len(added)} 条新增")
+
+    # 发送邮件
+    print(f"正在发送邮件，共 {len(added)} 条...")
+    diff_email = build_change_email(added, [], url)
 
     try:
         send_email(config, diff_email)
