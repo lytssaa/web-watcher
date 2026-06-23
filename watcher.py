@@ -713,6 +713,7 @@ def check_once(config: dict) -> bool:
 
     # ── HTML 模式（原有爬虫逻辑） ──
     print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在抓取 {url} ...")
+    max_pages = config.get("max_pages", 10)
 
     # 加载旧快照，获取上次检查时间
     old_snapshot = load_json(SNAPSHOT_FILE)
