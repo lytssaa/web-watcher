@@ -2,8 +2,8 @@ name: Web Watcher
 
 on:
   schedule:
-    # 每整点运行一次（UTC），北京时间每小时一次
-    - cron: '0 * * * *'
+    # 每天北京时间 20:00（UTC 12:00）执行一次
+    - cron: '0 12 * * *'
   workflow_dispatch:  # 手动触发
 
 jobs:
