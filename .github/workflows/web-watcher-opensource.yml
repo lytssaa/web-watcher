@@ -1,0 +1,38 @@
+name: Web Watcher - 开源雷达
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Restore snapshot cache
+        uses: actions/cache@v5
+        with:
+          path: snapshot_os.json
+          key: web-watcher-os-snapshot
+          restore-keys: web-watcher-os-snapshot
+
+      - name: Run watcher
+        env:
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          RECIPIENT: ${{ secrets.RECIPIENT }}
+          TARGET_URL: https://aihot.instantech.cn/
+          SNAPSHOT_FILE: snapshot_os.json
+        run: python run_github.py

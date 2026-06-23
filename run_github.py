@@ -9,7 +9,7 @@ import sys
 from datetime import datetime
 
 CONFIG_FILE = "config.json"
-SNAPSHOT_FILE = "snapshot.json"
+SNAPSHOT_FILE = os.environ.get("SNAPSHOT_FILE", "snapshot.json")
 
 
 def main():
