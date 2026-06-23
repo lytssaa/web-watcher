@@ -173,6 +173,7 @@ def parse_opensource_items(api_data: list, now_ts: str) -> list:
 
 
 # ── item 解析（单个 HTML） ────────────────────────────
+def _parse_one_item(block: str) -> dict:
     """解析一个 timeline-item"""
     item = {}
 
