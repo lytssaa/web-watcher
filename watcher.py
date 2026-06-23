@@ -320,7 +320,7 @@ def format_item_html(item: dict) -> str:
 
 
 def build_change_email(added: list, removed: list, url: str) -> str:
-    """构建变化通知 HTML 邮件"""
+    """构建变化通知 HTML 邮件（仅显示新增条目）"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     content_parts = []
@@ -333,15 +333,7 @@ def build_change_email(added: list, removed: list, url: str) -> str:
         for item in added:
             content_parts.append(format_item_html(item))
 
-    if removed:
-        content_parts.append(
-            f'<p style="font-size:16px; font-weight:bold; color:#c62828; margin:12px 0 6px 0;">'
-            f'&#x25BC; 消失条目（{len(removed)} 条）</p>'
-        )
-        for item in removed:
-            content_parts.append(format_item_html(item))
-
-    if not added and not removed:
+    if not added:
         content_parts.append('<p style="color:#888; font-size:14px;">检测到变化，但无法识别具体条目差异。</p>')
 
     html_email = f"""<!DOCTYPE html>
@@ -450,20 +442,49 @@ def interactive_setup() -> dict:
 # ── 主流程 ──────────────────────────────────────────
 
 def check_once(config: dict) -> bool:
-    """执行一次抓取→解析→对比→通知流程"""
+    """执行一次抓取→解析→对比→通知流程（支持多页爬取）"""
     url = config["target_url"]
+    max_pages = config.get("max_pages", 3)
+    
     print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在抓取 {url} ...")
 
-    try:
-        html = fetch_page(url)
-    except Exception as e:
-        print(f"抓取失败: {e}")
-        return False
+    # 分离基础 URL 和已有参数
+    base_url = url.split("?")[0]
+    
+    all_items = []
+    seen_ids = set()
+    
+    for page in range(1, max_pages + 1):
+        page_url = f"{base_url}?page={page}"
+        try:
+            html = fetch_page(page_url)
+        except Exception as e:
+            print(f"  第{page}页抓取失败: {e}")
+            continue
+        
+        items = parse_news_items(html)
+        # 去重
+        new_count = 0
+        for item in items:
+            iid = item.get("id")
+            if iid and iid not in seen_ids:
+                seen_ids.add(iid)
+                all_items.append(item)
+                new_count += 1
+            elif not iid:
+                all_items.append(item)
+                new_count += 1
+        
+        print(f"  第{page}页: {len(items)} 条（新增 {new_count} 条）")
+        
+        # 如果这页没有新条目，说明已经到头
+        if new_count == 0:
+            break
+    
+    print(f"  共 {len(all_items)} 条去重后条目")
 
-    # 解析当前条目
-    new_items = parse_news_items(html)
-    new_snapshot = make_snapshot(new_items)
-    print(f"  解析到 {len(new_items)} 条新闻")
+    # 构建新快照
+    new_snapshot = make_snapshot(all_items)
 
     # 加载旧快照
     old_snapshot = load_json(SNAPSHOT_FILE)

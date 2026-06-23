@@ -25,7 +25,8 @@ def main():
 
     errors = []
     config = {
-        "check_interval_minutes": 60,
+        "check_interval_minutes": 240,
+        "max_pages": 3,
     }
 
     for env_key, cfg_key in required_vars.items():
