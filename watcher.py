@@ -40,50 +40,41 @@ def fetch_page(url: str) -> str:
 def fetch_opensource_api(url: str) -> list:
     """
     调用 AI 开源雷达 JSON API，返回项目列表。
-    异常时抛出可读错误，日志输出详细信息。
+    用 cloudscraper 绕过 Cloudflare 防护。
     """
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/138.0.0.0 Safari/537.36 QQBrowser/21.3.8983.400"
-        ),
-        "Referer": "https://aihot.instantech.cn/",
-        "Accept": "*/*",
-        "Accept-Language": "zh-CN,zh;q=0.9",
-    }
     try:
+        import cloudscraper
+        scraper = cloudscraper.create_scraper(browser={"browser": "chrome", "platform": "windows", "mobile": False})
+        resp = scraper.get(url, timeout=30)
+    except ImportError:
+        # 没有 cloudscraper，用 requests + 完整浏览器头
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 QQBrowser/21.3.8983.400",
+            "Accept": "*/*",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "Referer": "https://aihot.instantech.cn/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+        }
         resp = requests.get(url, headers=headers, timeout=30)
-    except requests.Timeout:
-        raise RuntimeError(f"API 请求超时: {url}")
-    except requests.ConnectionError as e:
-        raise RuntimeError(f"API 连接失败: {e}\n  完整 curl: curl -v '{url}' -H 'User-Agent: ...'")
     except Exception as e:
-        raise RuntimeError(f"API 请求异常: {e}")
+        raise RuntimeError(f"API 请求失败: {e}")
 
     if resp.status_code != 200:
-        raise RuntimeError(
-            f"API 返回非 200 状态码: {resp.status_code}\n"
-            f"  响应体预览: {resp.text[:300]}"
-        )
+        raise RuntimeError(f"API 返回 {resp.status_code}: {resp.text[:300]}")
 
     try:
         data = resp.json()
     except Exception as e:
-        raise RuntimeError(
-            f"API JSON 解析失败: {e}\n"
-            f"  响应体预览: {resp.text[:300]}"
-        )
+        raise RuntimeError(f"JSON 解析失败: {e}, 响应: {resp.text[:300]}")
 
     if data.get("code") != 200:
-        raise RuntimeError(
-            f"API 业务状态码异常: {data.get('code')}, msg: {data.get('msg')}\n"
-            f"  完整响应: {json.dumps(data, ensure_ascii=False)[:500]}"
-        )
+        raise RuntimeError(f"API 业务码异常: {data.get('code')}, msg: {data.get('msg')}")
 
     items = data.get("data", [])
     if not isinstance(items, list):
-        raise RuntimeError(f"API 返回 data 不是数组: {type(items)}")
+        raise RuntimeError(f"data 不是数组: {type(items)}")
     return items
 
 
