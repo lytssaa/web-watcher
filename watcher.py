@@ -752,7 +752,7 @@ def interactive_setup() -> dict:
 def check_once(config: dict) -> bool:
     """执行一次抓取→解析→按时间过滤→通知流程"""
     url = config["target_url"]
-    now_ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    now_ts = now_bj().strftime("%Y-%m-%dT%H:%M:%S")
 
     # ── API 模式（开源雷达 JSON API） ──
     if config.get("api_type"):
@@ -816,7 +816,7 @@ def check_once(config: dict) -> bool:
 
     # 分离基础 URL
     base_url = url.split("?")[0]
-    now_ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    now_ts = now_bj().strftime("%Y-%m-%dT%H:%M:%S")
 
     all_items = []
     seen_ids = set()
