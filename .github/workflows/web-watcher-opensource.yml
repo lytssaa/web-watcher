@@ -2,8 +2,8 @@ name: Web Watcher - 开源雷达
 
 on:
   schedule:
-    # UTC 12:00 = 北京时间 20:00，每天晚 8 点扫描开源雷达
-    - cron: '0 12 * * *'
+    # UTC 8:00 = 北京时间 16:00，每天下午 4 点扫描开源雷达
+    - cron: '0 8 * * *'
   workflow_dispatch:
 
 jobs:
