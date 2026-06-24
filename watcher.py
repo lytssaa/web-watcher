@@ -752,7 +752,12 @@ def interactive_setup() -> dict:
 def check_once(config: dict) -> bool:
     """执行一次抓取→解析→按时间过滤→通知流程"""
     url = config["target_url"]
-    now_ts = now_bj().strftime("%Y-%m-%dT%H:%M:%S")
+    now = now_bj()
+    now_ts = now.strftime("%Y-%m-%dT%H:%M:%S")
+
+    # 始终以当前时间往前推 4 小时作为截断点
+    since_time = (now - timedelta(hours=4)).strftime("%Y-%m-%dT%H:%M:%S")
+    print(f"[{now.strftime('%H:%M')}] 仅保留时间 > {since_time} 的条目（最近4小时）")
 
     # ── API 模式（开源雷达 JSON API） ──
     if config.get("api_type"):
@@ -804,23 +809,15 @@ def check_once(config: dict) -> bool:
             return False
 
     # ── HTML 模式（原有爬虫逻辑） ──
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在抓取 {url} ...")
+    print(f"[{now.strftime('%H:%M')}] 正在抓取 {url} ...")
     max_pages = config.get("max_pages", 10)
-
-    # 加载旧快照，获取上次检查时间
-    old_snapshot = load_json(SNAPSHOT_FILE)
-    since_time = None
-    if old_snapshot and "checked_at" in old_snapshot:
-        since_time = old_snapshot["checked_at"]
-        print(f"  上次检查时间: {since_time}")
 
     # 分离基础 URL
     base_url = url.split("?")[0]
-    now_ts = now_bj().strftime("%Y-%m-%dT%H:%M:%S")
 
     all_items = []
     seen_ids = set()
-    hit_old_content = False  # 遇到旧内容就停
+    hit_old_content = False
 
     for page in range(1, max_pages + 1):
         if hit_old_content:
