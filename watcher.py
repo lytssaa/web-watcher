@@ -148,7 +148,7 @@ def fetch_news_api(url: str) -> list:
     if not isinstance(items_raw, list):
         raise RuntimeError(f"API 返回数据格式异常: {type(items_raw)}")
 
-    now = datetime.now()
+    now = now_bj()
     now_ts = now.strftime("%Y-%m-%dT%H:%M:%S")
     now_time = now.strftime("%H:%M")
     items = []
