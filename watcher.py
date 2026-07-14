@@ -49,42 +49,7 @@ def fetch_page(url: str) -> str:
             f"HTTP {resp.status_code} (url: {url})"
         )
     resp.encoding = resp.apparent_encoding or "utf-8"
-    html_text = resp.text
-
-    # 检测是否返回了 JS 反爬挑战页面（特征：以 <script> 开头且包含混淆代码）
-    stripped = html_text.strip()
-    if stripped.startswith("<script") and ("_0x" in stripped or "function a(" in stripped[:1000]):
-        print(f"  ⚠ 检测到 JS 反爬挑战，尝试 curl 绕过...")
-        import subprocess
-        curl_headers = [
-            "-H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'",
-            "-H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'",
-            "-H 'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8'",
-            "-H 'Accept-Encoding: gzip, deflate, br'",
-            "-H 'Referer: https://www.google.com/'",
-            "-H 'Sec-Fetch-Dest: document'",
-            "-H 'Sec-Fetch-Mode: navigate'",
-            "-H 'Sec-Fetch-Site: none'",
-            "-H 'Sec-Fetch-User: ?1'",
-            "-H 'Upgrade-Insecure-Requests: 1'",
-        ]
-        h = " ".join(curl_headers)
-        cmd = f"curl -s --connect-timeout 15 --max-time 30 --compressed {h} '{url}'"
-        try:
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=35)
-            if result.returncode == 0 and result.stdout:
-                html_text = result.stdout
-                # 再次检查是否还是挑战页面
-                if len(html_text) > 5000 and "timeline-item" in html_text:
-                    print(f"  ✅ curl 绕过成功，长度: {len(html_text)}")
-                else:
-                    print(f"  ⚠ curl 获取到 {len(html_text)} 字节，但可能仍不是正常页面")
-            else:
-                print(f"  ⚠ curl 失败 (code={result.returncode}), 保留原始响应")
-        except Exception as e:
-            print(f"  ⚠ curl 异常: {e}")
-
-    return html_text
+    return resp.text
 
 
 def fetch_opensource_api(url: str) -> list:
@@ -150,6 +115,62 @@ def fetch_opensource_api(url: str) -> list:
     items = data.get("data", [])
     if not isinstance(items, list):
         raise RuntimeError(f"data 不是数组: {type(items)}")
+    return items
+
+
+def fetch_news_api(url: str) -> list:
+    """
+    通过 JSON API 获取热点新闻列表。
+    当 HTML 爬虫被 JS 反爬挑战拦截时，作为回退方案使用。
+    从 url 中提取域名，构造 /api/public/items 接口地址。
+    """
+    import re
+    # 从 URL 中提取域名
+    m = re.match(r'https?://([^/]+)', url)
+    if not m:
+        raise RuntimeError(f"无法从 URL 提取域名: {url}")
+    domain = m.group(1)
+    api_url = f"https://{domain}/api/public/items?limit=50"
+
+    print(f"  ▶ 尝试调用 API: {api_url}")
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/125.0.0.0 Safari/537.36"
+        )
+    }
+    resp = requests.get(api_url, headers=headers, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"API HTTP {resp.status_code}")
+    data = resp.json()
+    items_raw = data.get("items", []) if isinstance(data, dict) else data
+    if not isinstance(items_raw, list):
+        raise RuntimeError(f"API 返回数据格式异常: {type(items_raw)}")
+
+    now = datetime.now()
+    now_ts = now.strftime("%Y-%m-%dT%H:%M:%S")
+    items = []
+    for obj in items_raw:
+        if not obj.get("id"):
+            continue
+        item = {
+            "id": obj.get("id"),
+            "title": obj.get("title", ""),
+            "url": obj.get("url", ""),
+            "source": obj.get("source", ""),
+            "score": str(obj.get("score", "")),
+            "summary": obj.get("summary", ""),
+            "tags": obj.get("tags", []),
+            "category": obj.get("category", ""),
+            "full_time": obj.get("publishedAt", now_ts),
+        }
+        # 构建 raw_text 用于哈希
+        raw = f"{item['title']} | {item['source']} | {item['score']}"
+        item["raw_text"] = raw
+        item["hash"] = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        items.append(item)
+
     return items
 
 
@@ -926,6 +947,24 @@ def check_once(config: dict) -> bool:
         print(f"  第{page}页: {len(items)} 条（新 {new_in_page} 条）")
 
     print(f"  共 {len(all_items)} 条新增条目")
+
+    # 如果 HTML 爬虫全部返回 0 条，可能是 JS 反爬挑战，尝试回退到 API 获取
+    if not all_items and not hit_old_content:
+        print(f"  ⚠ HTML 爬虫未获取到任何内容，尝试回退到 API 模式...")
+        try:
+            api_items = fetch_news_api(url)
+            if api_items:
+                print(f"  ✅ API 回退成功，获取到 {len(api_items)} 条")
+                # 按时间过滤
+                for item in api_items:
+                    ft = item.get("full_time")
+                    if since_time and ft:
+                        if ft <= since_time:
+                            continue
+                    all_items.append(item)
+                print(f"  ▶ 时间过滤后剩余 {len(all_items)} 条")
+        except Exception as e:
+            print(f"  ⚠ API 回退也失败: {e}")
 
     # 限制邮件条目数，避免邮件过大被 SMTP 服务器拒绝
     MAX_EMAIL_ITEMS = 50
