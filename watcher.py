@@ -863,6 +863,11 @@ def check_once(config: dict) -> bool:
 
         items = parse_news_items(html)
 
+        # 调试：如果解析出 0 条，打印 HTML 头部片段
+        if not items:
+            snippet = html[:500].replace("\n", " ").strip()
+            print(f"  ⚠ 第{page}页解析出 0 条，HTML 前500字符: {snippet}")
+
         new_in_page = 0
         for item in items:
             iid = item.get("id")
