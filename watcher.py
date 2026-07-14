@@ -967,21 +967,14 @@ def check_once(config: dict) -> bool:
             api_items = fetch_news_api(url)
             if api_items:
                 print(f"  ✅ API 回退成功，获取到 {len(api_items)} 条")
-                # 使用快照对比，首次发全部，后续只发新增（类似开源雷达 API 模式）
-                old_snapshot = load_json(SNAPSHOT_FILE)
-                if old_snapshot is None:
-                    to_send = api_items
-                    print(f"  [首次] 准备发送全部 {len(to_send)} 条")
-                else:
-                    new_snap = make_snapshot(api_items)
-                    added, _ = compare_snapshots(old_snapshot, new_snap)
-                    to_send = added
-                    print(f"  [增量] 新增 {len(to_send)} 条")
-                # 直接走邮件发送流程
-                if to_send:
-                    all_items = to_send
-                else:
-                    print("  无新增项目")
+                # 按时间过滤（4小时窗口），full_time 已由 fetch_news_api 转为北京时间
+                for item in api_items:
+                    ft = item.get("full_time")
+                    if since_time and ft:
+                        if ft <= since_time:
+                            continue
+                    all_items.append(item)
+                print(f"  ▶ 时间过滤后剩余 {len(all_items)} 条")
         except Exception as e:
             print(f"  ⚠ API 回退也失败: {e}")
 
