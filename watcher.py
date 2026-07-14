@@ -48,27 +48,43 @@ def fetch_page(url: str) -> str:
         raise RuntimeError(
             f"HTTP {resp.status_code} (url: {url})"
         )
-    # 检测是否返回了 JS 反爬挑战页面（特征：以 <script> 开头且包含混淆代码）
-    html_text = resp.text.strip()
-    if html_text.startswith("<script") and ("_0x" in html_text or "function a(" in html_text[:1000]):
-        print(f"  ⚠ 检测到 JS 反爬挑战，尝试 cloudscraper 绕过...")
-        try:
-            import cloudscraper
-            scraper = cloudscraper.create_scraper(
-                browser={"browser": "chrome", "platform": "windows", "mobile": False}
-            )
-            resp2 = scraper.get(url, timeout=60)
-            if resp2.status_code == 200:
-                html_text = resp2.text.strip()
-                print(f"  ✅ cloudscraper 绕过成功，长度: {len(html_text)}")
-            else:
-                print(f"  ⚠ cloudscraper 返回 {resp2.status_code}，仍使用原始响应")
-        except ImportError:
-            print(f"  ⚠ cloudscraper 未安装，跳过")
-        except Exception as e:
-            print(f"  ⚠ cloudscraper 异常: {e}")
     resp.encoding = resp.apparent_encoding or "utf-8"
-    return resp.text if html_text is resp.text.strip() else html_text
+    html_text = resp.text
+
+    # 检测是否返回了 JS 反爬挑战页面（特征：以 <script> 开头且包含混淆代码）
+    stripped = html_text.strip()
+    if stripped.startswith("<script") and ("_0x" in stripped or "function a(" in stripped[:1000]):
+        print(f"  ⚠ 检测到 JS 反爬挑战，尝试 curl 绕过...")
+        import subprocess
+        curl_headers = [
+            "-H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'",
+            "-H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'",
+            "-H 'Accept-Language: zh-CN,zh;q=0.9,en;q=0.8'",
+            "-H 'Accept-Encoding: gzip, deflate, br'",
+            "-H 'Referer: https://www.google.com/'",
+            "-H 'Sec-Fetch-Dest: document'",
+            "-H 'Sec-Fetch-Mode: navigate'",
+            "-H 'Sec-Fetch-Site: none'",
+            "-H 'Sec-Fetch-User: ?1'",
+            "-H 'Upgrade-Insecure-Requests: 1'",
+        ]
+        h = " ".join(curl_headers)
+        cmd = f"curl -s --connect-timeout 15 --max-time 30 --compressed {h} '{url}'"
+        try:
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=35)
+            if result.returncode == 0 and result.stdout:
+                html_text = result.stdout
+                # 再次检查是否还是挑战页面
+                if len(html_text) > 5000 and "timeline-item" in html_text:
+                    print(f"  ✅ curl 绕过成功，长度: {len(html_text)}")
+                else:
+                    print(f"  ⚠ curl 获取到 {len(html_text)} 字节，但可能仍不是正常页面")
+            else:
+                print(f"  ⚠ curl 失败 (code={result.returncode}), 保留原始响应")
+        except Exception as e:
+            print(f"  ⚠ curl 异常: {e}")
+
+    return html_text
 
 
 def fetch_opensource_api(url: str) -> list:
