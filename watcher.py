@@ -150,13 +150,20 @@ def fetch_news_api(url: str) -> list:
 
     now = now_bj()
     now_ts = now.strftime("%Y-%m-%dT%H:%M:%S")
-    now_time = now.strftime("%H:%M")
     items = []
     for obj in items_raw:
         if not obj.get("id"):
             continue
-        # 使用当前时间作为收录时间（而非原始发布时间），
-        # 这样4小时窗口能正确匹配所有API返回的条目
+        # time 用原始发布时间（用于显示），full_time 用当前时间（用于4小时窗口过滤）
+        pub = obj.get("publishedAt", "")
+        item_time = now.strftime("%H:%M")
+        if pub:
+            try:
+                utc_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
+                item_time = bj_dt.strftime("%H:%M")
+            except (ValueError, TypeError):
+                pass
         item = {
             "id": obj.get("id"),
             "title": obj.get("title", ""),
@@ -166,8 +173,8 @@ def fetch_news_api(url: str) -> list:
             "summary": obj.get("summary", ""),
             "tags": obj.get("tags", []),
             "category": obj.get("category", ""),
-            "full_time": now_ts,
-            "time": now_time,  # 用于邮件中显示时间
+            "full_time": now_ts,       # 当前时间，确保4小时窗口不过滤
+            "time": item_time,          # 原始发布时间，用于邮件中显示
         }
         # 构建 raw_text 用于哈希
         raw = f"{item['title']} | {item['source']} | {item['score']}"
