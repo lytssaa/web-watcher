@@ -48,8 +48,27 @@ def fetch_page(url: str) -> str:
         raise RuntimeError(
             f"HTTP {resp.status_code} (url: {url})"
         )
+    # 检测是否返回了 JS 反爬挑战页面（特征：以 <script> 开头且包含混淆代码）
+    html_text = resp.text.strip()
+    if html_text.startswith("<script") and ("_0x" in html_text or "function a(" in html_text[:1000]):
+        print(f"  ⚠ 检测到 JS 反爬挑战，尝试 cloudscraper 绕过...")
+        try:
+            import cloudscraper
+            scraper = cloudscraper.create_scraper(
+                browser={"browser": "chrome", "platform": "windows", "mobile": False}
+            )
+            resp2 = scraper.get(url, timeout=60)
+            if resp2.status_code == 200:
+                html_text = resp2.text.strip()
+                print(f"  ✅ cloudscraper 绕过成功，长度: {len(html_text)}")
+            else:
+                print(f"  ⚠ cloudscraper 返回 {resp2.status_code}，仍使用原始响应")
+        except ImportError:
+            print(f"  ⚠ cloudscraper 未安装，跳过")
+        except Exception as e:
+            print(f"  ⚠ cloudscraper 异常: {e}")
     resp.encoding = resp.apparent_encoding or "utf-8"
-    return resp.text
+    return resp.text if html_text is resp.text.strip() else html_text
 
 
 def fetch_opensource_api(url: str) -> list:
