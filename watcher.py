@@ -154,6 +154,18 @@ def fetch_news_api(url: str) -> list:
     for obj in items_raw:
         if not obj.get("id"):
             continue
+        # 将 publishedAt (UTC) 转为北京时间字符串
+        pub = obj.get("publishedAt", "")
+        if pub:
+            try:
+                # 解析 ISO 格式时间并转为北京时间
+                utc_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
+                full_time = bj_dt.strftime("%Y-%m-%dT%H:%M:%S")
+            except (ValueError, TypeError):
+                full_time = now_ts
+        else:
+            full_time = now_ts
         item = {
             "id": obj.get("id"),
             "title": obj.get("title", ""),
@@ -163,7 +175,7 @@ def fetch_news_api(url: str) -> list:
             "summary": obj.get("summary", ""),
             "tags": obj.get("tags", []),
             "category": obj.get("category", ""),
-            "full_time": obj.get("publishedAt", now_ts),
+            "full_time": full_time,
         }
         # 构建 raw_text 用于哈希
         raw = f"{item['title']} | {item['source']} | {item['score']}"
