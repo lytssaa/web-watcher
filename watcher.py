@@ -9,6 +9,7 @@ import hashlib
 import time
 import smtplib
 import email.mime.text
+import email.utils
 import os
 import sys
 import re
@@ -37,9 +38,16 @@ def fetch_page(url: str) -> str:
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/125.0.0.0 Safari/537.36"
-        )
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Referer": "https://www.google.com/",
     }
     resp = requests.get(url, headers=headers, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(
+            f"HTTP {resp.status_code} (url: {url})"
+        )
     resp.encoding = resp.apparent_encoding or "utf-8"
     return resp.text
 
@@ -443,7 +451,7 @@ def compare_snapshots(old: dict, new: dict) -> tuple:
 
 # ── 邮件生成 ──────────────────────────────────────────
 
-def format_item_html(item: dict) -> str:
+def format_item_html(item: dict, base_url: str = None) -> str:
     """格式化一条新闻为漂亮的 HTML 块（标题→来源→时间）"""
     parts = []
 
@@ -471,9 +479,11 @@ def format_item_html(item: dict) -> str:
             f'{html_mod.escape(summary)}</div>'
         )
 
-    # 正文（desc / body 作为补充）
+    # 正文（desc / body 作为补充，限制长度避免邮件过大）
     body_text = item.get("desc") or item.get("body") or ""
     if body_text:
+        if len(body_text) > 500:
+            body_text = body_text[:500] + "…"
         parts.append(f'<div style="font-size:14px; color:#444; line-height:1.6; margin-bottom:4px;">{html_mod.escape(body_text)}</div>')
 
     # 推荐理由
@@ -495,7 +505,9 @@ def format_item_html(item: dict) -> str:
 
     # 阅读原文
     if item.get("url"):
-        full_url = f"https://aihot.virxact.com{item['url']}" if item["url"].startswith("/") else item["url"]
+        full_url = item["url"]
+        if full_url.startswith("/") and base_url:
+            full_url = base_url.rstrip("/") + full_url
         parts.append(
             f'<div style="margin-top:4px;">'
             f'<a href="{html_mod.escape(full_url)}" style="color:#1976d2; font-size:13px; text-decoration:none;">'
@@ -578,6 +590,9 @@ def build_change_email(added: list, removed: list, url: str) -> str:
     """构建变化通知 HTML 邮件（仅显示新增条目）"""
     timestamp = now_bj().strftime("%Y-%m-%d %H:%M")
 
+    # 从 url 中提取基础站点（用于补全相对链接）
+    base_url = url.split("?")[0]
+
     content_parts = []
 
     if added:
@@ -586,7 +601,7 @@ def build_change_email(added: list, removed: list, url: str) -> str:
             f'&#x25B2; 新增条目（{len(added)} 条）</p>'
         )
         for item in added:
-            content_parts.append(format_item_html(item))
+            content_parts.append(format_item_html(item, base_url))
 
     if not added:
         content_parts.append('<p style="color:#888; font-size:14px;">检测到变化，但无法识别具体条目差异。</p>')
@@ -701,11 +716,20 @@ def send_email(config: dict, html_body: str, subject: str = None):
         )
     msg["From"] = config["smtp_user"]
     msg["To"] = ", ".join(config["recipients"])
+    msg["Date"] = email.utils.formatdate(localtime=True)
+    msg["Message-ID"] = email.utils.make_msgid(domain=config["smtp_server"].split(":")[0])
 
     with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
         server.starttls()
         server.login(config["smtp_user"], config["smtp_password"])
-        server.sendmail(config["smtp_user"], config["recipients"], msg.as_string())
+        failed = server.sendmail(
+            config["smtp_user"], config["recipients"], msg.as_string()
+        )
+        if failed:
+            raise RuntimeError(
+                f"部分收件人投递失败: {', '.join(failed.keys())}"
+                f" — {', '.join(str(v) for v in failed.values())}"
+            )
 
 
 def send_simple_notification(config: dict):
@@ -717,11 +741,17 @@ def send_simple_notification(config: dict):
     msg["Subject"] = f"网页变化通知 — {now_bj().strftime('%Y-%m-%d %H:%M')}"
     msg["From"] = config["smtp_user"]
     msg["To"] = ", ".join(config["recipients"])
+    msg["Date"] = email.utils.formatdate(localtime=True)
+    msg["Message-ID"] = email.utils.make_msgid(domain=config["smtp_server"].split(":")[0])
 
     with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
         server.starttls()
         server.login(config["smtp_user"], config["smtp_password"])
-        server.sendmail(config["smtp_user"], config["recipients"], msg.as_string())
+        failed = server.sendmail(config["smtp_user"], config["recipients"], msg.as_string())
+        if failed:
+            raise RuntimeError(
+                f"部分收件人投递失败: {', '.join(failed.keys())}"
+            )
 
 
 # ── 配置管理 ──────────────────────────────────────────
@@ -856,6 +886,12 @@ def check_once(config: dict) -> bool:
         print(f"  第{page}页: {len(items)} 条（新 {new_in_page} 条）")
 
     print(f"  共 {len(all_items)} 条新增条目")
+
+    # 限制邮件条目数，避免邮件过大被 SMTP 服务器拒绝
+    MAX_EMAIL_ITEMS = 50
+    if len(all_items) > MAX_EMAIL_ITEMS:
+        print(f"  条目过多，仅取前 {MAX_EMAIL_ITEMS} 条发送邮件")
+        all_items = all_items[:MAX_EMAIL_ITEMS]
 
     # 构建新快照（包含本次检查时间）
     new_snapshot = make_snapshot(all_items)
