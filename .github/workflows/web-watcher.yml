@@ -18,7 +18,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests cloudscraper
 
       - name: Restore snapshot cache
         uses: actions/cache@v5
