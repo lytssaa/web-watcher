@@ -9,7 +9,6 @@ import hashlib
 import time
 import smtplib
 import email.mime.text
-import email.utils
 import os
 import sys
 import re
@@ -38,18 +37,68 @@ def fetch_page(url: str) -> str:
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/125.0.0.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "Referer": "https://www.google.com/",
+        )
     }
     resp = requests.get(url, headers=headers, timeout=30)
-    if resp.status_code != 200:
-        raise RuntimeError(
-            f"HTTP {resp.status_code} (url: {url})"
-        )
     resp.encoding = resp.apparent_encoding or "utf-8"
-    return resp.text
+    html_text = resp.text
+
+    # 检测 JS 反爬挑战，回退到 JSON API
+    stripped = html_text.strip()
+    if stripped.startswith("<script") and ("_0x" in stripped or "function a(" in stripped[:1000]):
+        import re as _re
+        # 从 URL 提取域名，构造 API 地址
+        m = _re.match(r'https?://([^/]+)', url)
+        if m:
+            api_url = f"https://{m.group(1)}/api/public/items?limit=50"
+            try:
+                api_resp = requests.get(api_url, headers=headers, timeout=30)
+                if api_resp.status_code == 200:
+                    data = api_resp.json()
+                    items_raw = data.get("items", []) if isinstance(data, dict) else data
+                    blocks = []
+                    now = datetime.now()
+                    page_date = now.strftime("%Y-%m-%d")
+                    for obj in items_raw:
+                        if not obj.get("id"):
+                            continue
+                        item_id = obj.get("id", "")
+                        title = (obj.get("title") or "").replace("<", "&lt;").replace(">", "&gt;")
+                        source = (obj.get("source") or "").replace("<", "&lt;").replace(">", "&gt;")
+                        score = str(obj.get("score") or "")
+                        summary = (obj.get("summary") or "").replace("<", "&lt;").replace(">", "&gt;")
+                        item_url = (obj.get("url") or "#").replace('"', "&quot;")
+                        pub = obj.get("publishedAt", "")
+                        t = now.strftime("%H:%M")
+                        if pub:
+                            try:
+                                utc_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                                bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
+                                t = bj_dt.strftime("%H:%M")
+                            except (ValueError, TypeError):
+                                pass
+                        blocks.append(
+                            f'<div class="timeline-item ">'
+                            f'<div class="timeline-time">{t}</div>'
+                            f'<article class="timeline-card">'
+                            f'<div data-item-id="{item_id}">'
+                            f'<div class="timeline-card-head">'
+                            f'<div class="timeline-head-left">'
+                            f'<span class="timeline-source">{source}</span>'
+                            f'</div>'
+                            f'<div class="timeline-head-right">'
+                            f'<span class="timeline-score">{score}</span>'
+                            f'</div></div>'
+                            f'<div class="timeline-card-body">'
+                            f'<a class="timeline-title" href="{item_url}">{title}</a>'
+                            f'<p class="timeline-summary">{summary}</p>'
+                            f'</div></div></article></div>'
+                        )
+                    if blocks:
+                        html_text = f'<html><body>{page_date}月{now.day}日{"".join(blocks)}</body></html>'
+            except Exception:
+                pass
+    return html_text
 
 
 def fetch_opensource_api(url: str) -> list:
@@ -115,73 +164,6 @@ def fetch_opensource_api(url: str) -> list:
     items = data.get("data", [])
     if not isinstance(items, list):
         raise RuntimeError(f"data 不是数组: {type(items)}")
-    return items
-
-
-def fetch_news_api(url: str) -> list:
-    """
-    通过 JSON API 获取热点新闻列表。
-    当 HTML 爬虫被 JS 反爬挑战拦截时，作为回退方案使用。
-    从 url 中提取域名，构造 /api/public/items 接口地址。
-    """
-    import re
-    # 从 URL 中提取域名
-    m = re.match(r'https?://([^/]+)', url)
-    if not m:
-        raise RuntimeError(f"无法从 URL 提取域名: {url}")
-    domain = m.group(1)
-    api_url = f"https://{domain}/api/public/items?limit=50"
-
-    print(f"  ▶ 尝试调用 API: {api_url}")
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/125.0.0.0 Safari/537.36"
-        )
-    }
-    resp = requests.get(api_url, headers=headers, timeout=30)
-    if resp.status_code != 200:
-        raise RuntimeError(f"API HTTP {resp.status_code}")
-    data = resp.json()
-    items_raw = data.get("items", []) if isinstance(data, dict) else data
-    if not isinstance(items_raw, list):
-        raise RuntimeError(f"API 返回数据格式异常: {type(items_raw)}")
-
-    now = now_bj()
-    now_ts = now.strftime("%Y-%m-%dT%H:%M:%S")
-    items = []
-    for obj in items_raw:
-        if not obj.get("id"):
-            continue
-        # time 用原始发布时间（用于显示），full_time 用当前时间（用于4小时窗口过滤）
-        pub = obj.get("publishedAt", "")
-        item_time = now.strftime("%H:%M")
-        if pub:
-            try:
-                utc_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
-                bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
-                item_time = bj_dt.strftime("%H:%M")
-            except (ValueError, TypeError):
-                pass
-        item = {
-            "id": obj.get("id"),
-            "title": obj.get("title", ""),
-            "url": obj.get("url", ""),
-            "source": obj.get("source", ""),
-            "score": str(obj.get("score", "")),
-            "summary": obj.get("summary", ""),
-            "tags": obj.get("tags", []),
-            "category": obj.get("category", ""),
-            "full_time": now_ts,       # 当前时间，确保4小时窗口不过滤
-            "time": item_time,          # 原始发布时间，用于邮件中显示
-        }
-        # 构建 raw_text 用于哈希
-        raw = f"{item['title']} | {item['source']} | {item['score']}"
-        item["raw_text"] = raw
-        item["hash"] = hashlib.sha256(raw.encode("utf-8")).hexdigest()
-        items.append(item)
-
     return items
 
 
@@ -518,7 +500,7 @@ def compare_snapshots(old: dict, new: dict) -> tuple:
 
 # ── 邮件生成 ──────────────────────────────────────────
 
-def format_item_html(item: dict, base_url: str = None) -> str:
+def format_item_html(item: dict) -> str:
     """格式化一条新闻为漂亮的 HTML 块（标题→来源→时间）"""
     parts = []
 
@@ -546,11 +528,9 @@ def format_item_html(item: dict, base_url: str = None) -> str:
             f'{html_mod.escape(summary)}</div>'
         )
 
-    # 正文（desc / body 作为补充，限制长度避免邮件过大）
+    # 正文（desc / body 作为补充）
     body_text = item.get("desc") or item.get("body") or ""
     if body_text:
-        if len(body_text) > 500:
-            body_text = body_text[:500] + "…"
         parts.append(f'<div style="font-size:14px; color:#444; line-height:1.6; margin-bottom:4px;">{html_mod.escape(body_text)}</div>')
 
     # 推荐理由
@@ -572,9 +552,7 @@ def format_item_html(item: dict, base_url: str = None) -> str:
 
     # 阅读原文
     if item.get("url"):
-        full_url = item["url"]
-        if full_url.startswith("/") and base_url:
-            full_url = base_url.rstrip("/") + full_url
+        full_url = f"https://aihot.virxact.com{item['url']}" if item["url"].startswith("/") else item["url"]
         parts.append(
             f'<div style="margin-top:4px;">'
             f'<a href="{html_mod.escape(full_url)}" style="color:#1976d2; font-size:13px; text-decoration:none;">'
@@ -657,9 +635,6 @@ def build_change_email(added: list, removed: list, url: str) -> str:
     """构建变化通知 HTML 邮件（仅显示新增条目）"""
     timestamp = now_bj().strftime("%Y-%m-%d %H:%M")
 
-    # 从 url 中提取基础站点（用于补全相对链接）
-    base_url = url.split("?")[0]
-
     content_parts = []
 
     if added:
@@ -668,7 +643,7 @@ def build_change_email(added: list, removed: list, url: str) -> str:
             f'&#x25B2; 新增条目（{len(added)} 条）</p>'
         )
         for item in added:
-            content_parts.append(format_item_html(item, base_url))
+            content_parts.append(format_item_html(item))
 
     if not added:
         content_parts.append('<p style="color:#888; font-size:14px;">检测到变化，但无法识别具体条目差异。</p>')
@@ -783,20 +758,11 @@ def send_email(config: dict, html_body: str, subject: str = None):
         )
     msg["From"] = config["smtp_user"]
     msg["To"] = ", ".join(config["recipients"])
-    msg["Date"] = email.utils.formatdate(localtime=True)
-    msg["Message-ID"] = email.utils.make_msgid(domain=config["smtp_server"].split(":")[0])
 
     with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
         server.starttls()
         server.login(config["smtp_user"], config["smtp_password"])
-        failed = server.sendmail(
-            config["smtp_user"], config["recipients"], msg.as_string()
-        )
-        if failed:
-            raise RuntimeError(
-                f"部分收件人投递失败: {', '.join(failed.keys())}"
-                f" — {', '.join(str(v) for v in failed.values())}"
-            )
+        server.sendmail(config["smtp_user"], config["recipients"], msg.as_string())
 
 
 def send_simple_notification(config: dict):
@@ -808,17 +774,11 @@ def send_simple_notification(config: dict):
     msg["Subject"] = f"网页变化通知 — {now_bj().strftime('%Y-%m-%d %H:%M')}"
     msg["From"] = config["smtp_user"]
     msg["To"] = ", ".join(config["recipients"])
-    msg["Date"] = email.utils.formatdate(localtime=True)
-    msg["Message-ID"] = email.utils.make_msgid(domain=config["smtp_server"].split(":")[0])
 
     with smtplib.SMTP(config["smtp_server"], config["smtp_port"]) as server:
         server.starttls()
         server.login(config["smtp_user"], config["smtp_password"])
-        failed = server.sendmail(config["smtp_user"], config["recipients"], msg.as_string())
-        if failed:
-            raise RuntimeError(
-                f"部分收件人投递失败: {', '.join(failed.keys())}"
-            )
+        server.sendmail(config["smtp_user"], config["recipients"], msg.as_string())
 
 
 # ── 配置管理 ──────────────────────────────────────────
@@ -930,11 +890,6 @@ def check_once(config: dict) -> bool:
 
         items = parse_news_items(html)
 
-        # 调试：如果解析出 0 条，打印 HTML 头部片段
-        if not items:
-            snippet = html[:500].replace("\n", " ").strip()
-            print(f"  ⚠ 第{page}页解析出 0 条，HTML 前500字符: {snippet}")
-
         new_in_page = 0
         for item in items:
             iid = item.get("id")
@@ -958,30 +913,6 @@ def check_once(config: dict) -> bool:
         print(f"  第{page}页: {len(items)} 条（新 {new_in_page} 条）")
 
     print(f"  共 {len(all_items)} 条新增条目")
-
-    # 如果 HTML 爬虫全部返回 0 条，可能是 JS 反爬挑战，尝试回退到 API 获取
-    if not all_items and not hit_old_content:
-        print(f"  ⚠ HTML 爬虫未获取到任何内容，尝试回退到 API 模式...")
-        try:
-            api_items = fetch_news_api(url)
-            if api_items:
-                print(f"  ✅ API 回退成功，获取到 {len(api_items)} 条")
-                # 按时间过滤（4小时窗口），full_time 已由 fetch_news_api 转为北京时间
-                for item in api_items:
-                    ft = item.get("full_time")
-                    if since_time and ft:
-                        if ft <= since_time:
-                            continue
-                    all_items.append(item)
-                print(f"  ▶ 时间过滤后剩余 {len(all_items)} 条")
-        except Exception as e:
-            print(f"  ⚠ API 回退也失败: {e}")
-
-    # 限制邮件条目数，避免邮件过大被 SMTP 服务器拒绝
-    MAX_EMAIL_ITEMS = 50
-    if len(all_items) > MAX_EMAIL_ITEMS:
-        print(f"  条目过多，仅取前 {MAX_EMAIL_ITEMS} 条发送邮件")
-        all_items = all_items[:MAX_EMAIL_ITEMS]
 
     # 构建新快照（包含本次检查时间）
     new_snapshot = make_snapshot(all_items)
