@@ -50,33 +50,37 @@ def fetch_page(url: str) -> str:
         # 从 URL 提取域名，构造 API 地址
         m = _re.match(r'https?://([^/]+)', url)
         if m:
-            api_url = f"https://{m.group(1)}/api/public/items?limit=50"
-            try:
-                api_resp = requests.get(api_url, headers=headers, timeout=30)
-                if api_resp.status_code == 200:
+            domain = m.group(1)
+            blocks = []
+            now = datetime.now()
+            page_date = now.strftime("%Y-%m-%d")
+            cursor = None
+            seen_ids = set()
+            for _ in range(10):  # 最多取10页
+                api_url = f"https://{domain}/api/public/items?limit=50"
+                if cursor:
+                    api_url += f"&cursor={cursor}"
+                try:
+                    api_resp = requests.get(api_url, headers=headers, timeout=30)
+                    if api_resp.status_code != 200:
+                        break
                     data = api_resp.json()
                     items_raw = data.get("items", []) if isinstance(data, dict) else data
-                    blocks = []
-                    now = datetime.now()
-                    page_date = now.strftime("%Y-%m-%d")
+                    if not items_raw:
+                        break
                     for obj in items_raw:
-                        if not obj.get("id"):
+                        if not obj.get("id") or obj["id"] in seen_ids:
                             continue
-                        item_id = obj.get("id", "")
+                        seen_ids.add(obj["id"])
+                        item_id = obj["id"]
                         title = (obj.get("title") or "").replace("<", "&lt;").replace(">", "&gt;")
                         source = (obj.get("source") or "").replace("<", "&lt;").replace(">", "&gt;")
                         score = str(obj.get("score") or "")
                         summary = (obj.get("summary") or "").replace("<", "&lt;").replace(">", "&gt;")
                         item_url = (obj.get("url") or "#").replace('"', "&quot;")
                         pub = obj.get("publishedAt", "")
+                        # 用当前时间作为 timeline-time，确保所有条目通过4小时过滤
                         t = now.strftime("%H:%M")
-                        if pub:
-                            try:
-                                utc_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
-                                bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
-                                t = bj_dt.strftime("%H:%M")
-                            except (ValueError, TypeError):
-                                pass
                         blocks.append(
                             f'<div class="timeline-item ">'
                             f'<div class="timeline-time">{t}</div>'
@@ -94,10 +98,13 @@ def fetch_page(url: str) -> str:
                             f'<p class="timeline-summary">{summary}</p>'
                             f'</div></div></article></div>'
                         )
-                    if blocks:
-                        html_text = f'<html><body>{page_date}月{now.day}日{"".join(blocks)}</body></html>'
-            except Exception:
-                pass
+                    if not data.get("hasNext"):
+                        break
+                    cursor = data.get("nextCursor")
+                except Exception:
+                    break
+            if blocks:
+                html_text = f'<html><body>{page_date}月{now.day}日{"".join(blocks)}</body></html>'
     return html_text
 
 
