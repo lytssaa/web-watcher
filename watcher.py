@@ -86,13 +86,13 @@ def fetch_page(url: str) -> str:
                     summary = (obj.get("summary") or "").replace("<", "&lt;").replace(">", "&gt;")
                     item_url = (obj.get("url") or "#").replace('"', "&quot;")
                     pub = obj.get("publishedAt", "")
-                    # timeline-time 显示原始发布时间
-                    t = now.strftime("%H:%M")
+                    # timeline-time 显示原始发布时间（含日期）
+                    t = now.strftime("%m月%d日 %H:%M")
                     if pub:
                         try:
                             utc_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
                             bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
-                            t = bj_dt.strftime("%H:%M")
+                            t = bj_dt.strftime("%m月%d日 %H:%M")
                         except (ValueError, TypeError):
                             pass
                     # data-full-time 用当前时间，让4小时窗口正常过滤
