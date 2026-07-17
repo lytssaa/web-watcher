@@ -86,14 +86,21 @@ def fetch_page(url: str) -> str:
                     summary = (obj.get("summary") or "").replace("<", "&lt;").replace(">", "&gt;")
                     item_url = (obj.get("url") or "#").replace('"', "&quot;")
                     pub = obj.get("publishedAt", "")
+                    # 用当前时间作为 timeline-time（API没有收录时间字段）
                     t = now.strftime("%H:%M")
+                    # 原始发布时间显示在标题前面
+                    pub_prefix = ""
                     if pub:
                         try:
                             utc_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
                             bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
-                            t = bj_dt.strftime("%H:%M")
+                            pub_prefix = bj_dt.strftime("%H:%M")
                         except (ValueError, TypeError):
                             pass
+                    if pub_prefix:
+                        display_title = f"[{pub_prefix}] {title}"
+                    else:
+                        display_title = title
                     blocks.append(
                         f'<div class="timeline-item ">'
                         f'<div class="timeline-time">{t}</div>'
@@ -107,7 +114,7 @@ def fetch_page(url: str) -> str:
                         f'<span class="timeline-score">{score}</span>'
                         f'</div></div>'
                         f'<div class="timeline-card-body">'
-                        f'<a class="timeline-title" href="{item_url}">{title}</a>'
+                        f'<a class="timeline-title" href="{item_url}">{display_title}</a>'
                         f'<p class="timeline-summary">{summary}</p>'
                         f'</div></div></article></div>'
                     )
