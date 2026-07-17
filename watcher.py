@@ -76,8 +76,7 @@ def fetch_page(url: str) -> str:
                     break
             if all_api_items:
                 now = datetime.now()
-                page_date = now.strftime("%Y-%m-%d")
-                now_day = now.day
+                page_date = f"{now.month}月{now.day}日"
                 blocks = []
                 for obj in all_api_items:
                     item_id = obj.get("id", "")
@@ -113,7 +112,7 @@ def fetch_page(url: str) -> str:
                         f'</div></div></article></div>'
                     )
                 if blocks:
-                    html_text = f'<html><body>{page_date}月{now_day}日{"".join(blocks)}</body></html>'
+                    html_text = f'<html><body>{page_date}{"".join(blocks)}</body></html>'
     return html_text
 
 
