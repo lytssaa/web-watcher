@@ -95,8 +95,15 @@ def fetch_page(url: str) -> str:
                             t = bj_dt.strftime("%m月%d日 %H:%M")
                         except (ValueError, TypeError):
                             pass
-                    # data-full-time 用当前时间，让4小时窗口正常过滤
+                    # data-full-time 用 publishedAt 时间，让4小时窗口正常过滤旧新闻
                     ft = now.strftime("%Y-%m-%dT%H:%M:%S")
+                    if pub:
+                        try:
+                            utc_dt2 = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                            bj_dt2 = utc_dt2.astimezone(timezone(timedelta(hours=8)))
+                            ft = bj_dt2.strftime("%Y-%m-%dT%H:%M:%S")
+                        except (ValueError, TypeError):
+                            pass
                     blocks.append(
                         f'<div class="timeline-item " data-full-time="{ft}">'
                         f'<div class="timeline-time">{t}</div>'
