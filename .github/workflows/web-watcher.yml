@@ -18,7 +18,7 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install requests curl_cffi
+        run: pip install requests
 
       - name: Restore snapshot cache
         uses: actions/cache@v5
