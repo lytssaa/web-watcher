@@ -81,6 +81,19 @@ def fetch_page(url: str) -> str:
                         pub = obj.get("publishedAt", "")
                         # 用当前时间作为 timeline-time，确保所有条目通过4小时过滤
                         t = now.strftime("%H:%M")
+                        # 将原始发布时间显示在标题前面
+                        pub_time = ""
+                        if pub:
+                            try:
+                                utc_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                                bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
+                                pub_time = bj_dt.strftime("%H:%M")
+                            except (ValueError, TypeError):
+                                pass
+                        if pub_time:
+                            display_title = f"[{pub_time}] {title}"
+                        else:
+                            display_title = title
                         blocks.append(
                             f'<div class="timeline-item ">'
                             f'<div class="timeline-time">{t}</div>'
@@ -94,7 +107,7 @@ def fetch_page(url: str) -> str:
                             f'<span class="timeline-score">{score}</span>'
                             f'</div></div>'
                             f'<div class="timeline-card-body">'
-                            f'<a class="timeline-title" href="{item_url}">{title}</a>'
+                            f'<a class="timeline-title" href="{item_url}">{display_title}</a>'
                             f'<p class="timeline-summary">{summary}</p>'
                             f'</div></div></article></div>'
                         )
