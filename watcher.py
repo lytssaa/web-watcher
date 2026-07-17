@@ -86,7 +86,7 @@ def fetch_page(url: str) -> str:
                     summary = (obj.get("summary") or "").replace("<", "&lt;").replace(">", "&gt;")
                     item_url = (obj.get("url") or "#").replace('"', "&quot;")
                     pub = obj.get("publishedAt", "")
-                    # 用 publishedAt 转为北京时间作为 timeline-time
+                    # timeline-time 显示原始发布时间
                     t = now.strftime("%H:%M")
                     if pub:
                         try:
@@ -95,8 +95,10 @@ def fetch_page(url: str) -> str:
                             t = bj_dt.strftime("%H:%M")
                         except (ValueError, TypeError):
                             pass
+                    # data-full-time 用当前时间，让4小时窗口正常过滤
+                    ft = now.strftime("%Y-%m-%dT%H:%M:%S")
                     blocks.append(
-                        f'<div class="timeline-item ">'
+                        f'<div class="timeline-item " data-full-time="{ft}">'
                         f'<div class="timeline-time">{t}</div>'
                         f'<article class="timeline-card">'
                         f'<div data-item-id="{item_id}">'
@@ -263,8 +265,11 @@ def parse_news_items(html_text: str) -> list:
     for block in item_blocks:
         item = _parse_one_item(block)
         if item and item.get("raw_text"):
-            # 补充完整时间戳
-            if item.get("time") and page_date:
+            # 优先使用 data-full-time 属性（API回退时用于4小时窗口过滤）
+            dft = re.search(r'data-full-time="([^"]+)"', block)
+            if dft:
+                item["full_time"] = dft.group(1)
+            elif item.get("time") and page_date:
                 item["full_time"] = f"{page_date}T{item['time']}:00"
             items.append(item)
 
