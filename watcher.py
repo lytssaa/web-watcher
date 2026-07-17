@@ -75,7 +75,7 @@ def fetch_page(url: str) -> str:
                 except Exception:
                     break
             if all_api_items:
-                now = datetime.now()
+                now = now_bj()
                 page_date = f"{now.month}月{now.day}日"
                 blocks = []
                 for obj in all_api_items:
