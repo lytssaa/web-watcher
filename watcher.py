@@ -77,47 +77,72 @@ def fetch_page(url: str) -> str:
                 except Exception:
                     break
             if all_api_items:
+                # 快照对比：首次发全部，后续只发新增
                 now = now_bj()
                 page_date = f"{now.month}月{now.day}日"
-                blocks = []
+                ft = now.strftime("%Y-%m-%dT%H:%M:%S")
+                # 构建 items 用于快照对比
+                snap_items = []
                 for obj in all_api_items:
-                    item_id = obj.get("id", "")
-                    title = (obj.get("title") or "").replace("<", "&lt;").replace(">", "&gt;")
-                    source = (obj.get("source") or "").replace("<", "&lt;").replace(">", "&gt;")
-                    score = str(obj.get("score") or "")
-                    summary = (obj.get("summary") or "").replace("<", "&lt;").replace(">", "&gt;")
-                    item_url = (obj.get("url") or "#").replace('"', "&quot;")
                     pub = obj.get("publishedAt", "")
-                    # timeline-time 显示原始发布时间（含日期）
                     t = now.strftime("%m月%d日 %H:%M")
-                    ft = now.strftime("%Y-%m-%dT%H:%M:%S")
                     if pub:
                         try:
                             utc_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
                             bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
                             t = bj_dt.strftime("%m月%d日 %H:%M")
-                            ft = bj_dt.strftime("%Y-%m-%dT%H:%M:%S")
                         except (ValueError, TypeError):
                             pass
-                    blocks.append(
-                        f'<div class="timeline-item " data-full-time="{ft}">'
-                        f'<div class="timeline-time">{t}</div>'
-                        f'<article class="timeline-card">'
-                        f'<div data-item-id="{item_id}">'
-                        f'<div class="timeline-card-head">'
-                        f'<div class="timeline-head-left">'
-                        f'<span class="timeline-source">{source}</span>'
-                        f'</div>'
-                        f'<div class="timeline-head-right">'
-                        f'<span class="timeline-score">{score}</span>'
-                        f'</div></div>'
-                        f'<div class="timeline-card-body">'
-                        f'<a class="timeline-title" href="{item_url}">{title}</a>'
-                        f'<p class="timeline-summary">{summary}</p>'
-                        f'</div></div></article></div>'
-                    )
-                if blocks:
-                    html_text = f'<html><body>{page_date}{"".join(blocks)}</body></html>'
+                    raw = f"{obj.get('title','')} | {obj.get('source','')} | {obj.get('score','')}"
+                    snap_items.append({
+                        "id": obj.get("id", ""),
+                        "title": (obj.get("title") or "").replace("<", "&lt;").replace(">", "&gt;"),
+                        "source": (obj.get("source") or "").replace("<", "&lt;").replace(">", "&gt;"),
+                        "score": str(obj.get("score") or ""),
+                        "summary": (obj.get("summary") or "").replace("<", "&lt;").replace(">", "&gt;"),
+                        "url": (obj.get("url") or "#").replace('"', "&quot;"),
+                        "time": t,
+                        "raw_text": raw,
+                        "hash": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                    })
+                # 加载旧快照，对比出新增条目
+                old_snap = load_json(SNAPSHOT_FILE)
+                if old_snap is None:
+                    to_send = snap_items
+                    print(f"  [首次] 准备发送全部 {len(to_send)} 条")
+                else:
+                    old_ids = set(old_snap.get("by_id", {}).keys())
+                    to_send = [it for it in snap_items if it["id"] not in old_ids]
+                    print(f"  [增量] 新增 {len(to_send)} 条")
+                # 保存新快照
+                new_snap = make_snapshot(snap_items)
+                new_snap["checked_at"] = ft
+                save_json(SNAPSHOT_FILE, new_snap)
+                # 只构建新增条目的 HTML
+                if to_send:
+                    blocks = []
+                    for item in to_send:
+                        blocks.append(
+                            f'<div class="timeline-item " data-full-time="{ft}">'
+                            f'<div class="timeline-time">{item["time"]}</div>'
+                            f'<article class="timeline-card">'
+                            f'<div data-item-id="{item["id"]}">'
+                            f'<div class="timeline-card-head">'
+                            f'<div class="timeline-head-left">'
+                            f'<span class="timeline-source">{item["source"]}</span>'
+                            f'</div>'
+                            f'<div class="timeline-head-right">'
+                            f'<span class="timeline-score">{item["score"]}</span>'
+                            f'</div></div>'
+                            f'<div class="timeline-card-body">'
+                            f'<a class="timeline-title" href="{item["url"]}">{item["title"]}</a>'
+                            f'<p class="timeline-summary">{item["summary"]}</p>'
+                            f'</div></div></article></div>'
+                        )
+                    if blocks:
+                        html_text = f'<html><body>{page_date}{"".join(blocks)}</body></html>'
+                else:
+                    print("  无新增条目，跳过发送")
     return html_text
 
 
