@@ -47,77 +47,73 @@ def fetch_page(url: str) -> str:
     stripped = html_text.strip()
     if stripped.startswith("<script") and ("_0x" in stripped or "function a(" in stripped[:1000]):
         import re as _re
-        # 从 URL 提取域名，构造 API 地址
         m = _re.match(r'https?://([^/]+)', url)
         if m:
             domain = m.group(1)
-            blocks = []
-            now = datetime.now()
-            page_date = now.strftime("%Y-%m-%d")
+            all_api_items = []
             cursor = None
             seen_ids = set()
-            for _ in range(10):  # 最多取10页
+            for _ in range(10):
                 api_url = f"https://{domain}/api/public/items?limit=50"
                 if cursor:
                     api_url += f"&cursor={cursor}"
                 try:
-                    api_resp = requests.get(api_url, headers=headers, timeout=30)
-                    if api_resp.status_code != 200:
+                    r = requests.get(api_url, headers=headers, timeout=30)
+                    if r.status_code != 200:
                         break
-                    data = api_resp.json()
-                    items_raw = data.get("items", []) if isinstance(data, dict) else data
-                    if not items_raw:
+                    d = r.json()
+                    items = d.get("items", []) if isinstance(d, dict) else []
+                    if not items:
                         break
-                    for obj in items_raw:
-                        if not obj.get("id") or obj["id"] in seen_ids:
-                            continue
-                        seen_ids.add(obj["id"])
-                        item_id = obj["id"]
-                        title = (obj.get("title") or "").replace("<", "&lt;").replace(">", "&gt;")
-                        source = (obj.get("source") or "").replace("<", "&lt;").replace(">", "&gt;")
-                        score = str(obj.get("score") or "")
-                        summary = (obj.get("summary") or "").replace("<", "&lt;").replace(">", "&gt;")
-                        item_url = (obj.get("url") or "#").replace('"', "&quot;")
-                        pub = obj.get("publishedAt", "")
-                        # 用当前时间作为 timeline-time，确保所有条目通过4小时过滤
-                        t = now.strftime("%H:%M")
-                        # 将原始发布时间显示在标题前面
-                        pub_time = ""
-                        if pub:
-                            try:
-                                utc_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
-                                bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
-                                pub_time = bj_dt.strftime("%H:%M")
-                            except (ValueError, TypeError):
-                                pass
-                        if pub_time:
-                            display_title = f"[{pub_time}] {title}"
-                        else:
-                            display_title = title
-                        blocks.append(
-                            f'<div class="timeline-item ">'
-                            f'<div class="timeline-time">{t}</div>'
-                            f'<article class="timeline-card">'
-                            f'<div data-item-id="{item_id}">'
-                            f'<div class="timeline-card-head">'
-                            f'<div class="timeline-head-left">'
-                            f'<span class="timeline-source">{source}</span>'
-                            f'</div>'
-                            f'<div class="timeline-head-right">'
-                            f'<span class="timeline-score">{score}</span>'
-                            f'</div></div>'
-                            f'<div class="timeline-card-body">'
-                            f'<a class="timeline-title" href="{item_url}">{display_title}</a>'
-                            f'<p class="timeline-summary">{summary}</p>'
-                            f'</div></div></article></div>'
-                        )
-                    if not data.get("hasNext"):
+                    for obj in items:
+                        if obj.get("id") and obj["id"] not in seen_ids:
+                            seen_ids.add(obj["id"])
+                            all_api_items.append(obj)
+                    if not d.get("hasNext"):
                         break
-                    cursor = data.get("nextCursor")
+                    cursor = d.get("nextCursor")
                 except Exception:
                     break
-            if blocks:
-                html_text = f'<html><body>{page_date}月{now.day}日{"".join(blocks)}</body></html>'
+            if all_api_items:
+                now = datetime.now()
+                page_date = now.strftime("%Y-%m-%d")
+                now_day = now.day
+                blocks = []
+                for obj in all_api_items:
+                    item_id = obj.get("id", "")
+                    title = (obj.get("title") or "").replace("<", "&lt;").replace(">", "&gt;")
+                    source = (obj.get("source") or "").replace("<", "&lt;").replace(">", "&gt;")
+                    score = str(obj.get("score") or "")
+                    summary = (obj.get("summary") or "").replace("<", "&lt;").replace(">", "&gt;")
+                    item_url = (obj.get("url") or "#").replace('"', "&quot;")
+                    pub = obj.get("publishedAt", "")
+                    t = now.strftime("%H:%M")
+                    if pub:
+                        try:
+                            utc_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                            bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
+                            t = bj_dt.strftime("%H:%M")
+                        except (ValueError, TypeError):
+                            pass
+                    blocks.append(
+                        f'<div class="timeline-item ">'
+                        f'<div class="timeline-time">{t}</div>'
+                        f'<article class="timeline-card">'
+                        f'<div data-item-id="{item_id}">'
+                        f'<div class="timeline-card-head">'
+                        f'<div class="timeline-head-left">'
+                        f'<span class="timeline-source">{source}</span>'
+                        f'</div>'
+                        f'<div class="timeline-head-right">'
+                        f'<span class="timeline-score">{score}</span>'
+                        f'</div></div>'
+                        f'<div class="timeline-card-body">'
+                        f'<a class="timeline-title" href="{item_url}">{title}</a>'
+                        f'<p class="timeline-summary">{summary}</p>'
+                        f'</div></div></article></div>'
+                    )
+                if blocks:
+                    html_text = f'<html><body>{page_date}月{now_day}日{"".join(blocks)}</body></html>'
     return html_text
 
 
