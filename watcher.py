@@ -37,92 +37,34 @@ def fetch_page(url: str) -> str:
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/125.0.0.0 Safari/537.36"
-        )
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     }
     resp = requests.get(url, headers=headers, timeout=30)
     resp.encoding = resp.apparent_encoding or "utf-8"
     html_text = resp.text
 
-    # 检测 JS 反爬挑战，回退到 JSON API
+    # 检测 JS 反爬挑战，用 curl_cffi 模拟浏览器 TLS 指纹绕过
     stripped = html_text.strip()
     if stripped.startswith("<script") and ("_0x" in stripped or "function a(" in stripped[:1000]):
-        import re as _re
-        m = _re.match(r'https?://([^/]+)', url)
-        if m:
-            domain = m.group(1)
-            all_api_items = []
-            cursor = None
-            seen_ids = set()
-            for _ in range(10):
-                api_url = f"https://{domain}/api/public/items?limit=50"
-                if cursor:
-                    api_url += f"&cursor={cursor}"
-                try:
-                    r = requests.get(api_url, headers=headers, timeout=30)
-                    if r.status_code != 200:
-                        break
-                    d = r.json()
-                    items = d.get("items", []) if isinstance(d, dict) else []
-                    if not items:
-                        break
-                    for obj in items:
-                        if obj.get("id") and obj["id"] not in seen_ids:
-                            seen_ids.add(obj["id"])
-                            all_api_items.append(obj)
-                    if not d.get("hasNext"):
-                        break
-                    cursor = d.get("nextCursor")
-                except Exception:
-                    break
-            if all_api_items:
-                now = now_bj()
-                page_date = f"{now.month}月{now.day}日"
-                blocks = []
-                for obj in all_api_items:
-                    item_id = obj.get("id", "")
-                    title = (obj.get("title") or "").replace("<", "&lt;").replace(">", "&gt;")
-                    source = (obj.get("source") or "").replace("<", "&lt;").replace(">", "&gt;")
-                    score = str(obj.get("score") or "")
-                    summary = (obj.get("summary") or "").replace("<", "&lt;").replace(">", "&gt;")
-                    item_url = (obj.get("url") or "#").replace('"', "&quot;")
-                    pub = obj.get("publishedAt", "")
-                    # timeline-time 显示原始发布时间（含日期）
-                    t = now.strftime("%m月%d日 %H:%M")
-                    if pub:
-                        try:
-                            utc_dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
-                            bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
-                            t = bj_dt.strftime("%m月%d日 %H:%M")
-                        except (ValueError, TypeError):
-                            pass
-                    # data-full-time 用 publishedAt 时间，让4小时窗口正常过滤旧新闻
-                    ft = now.strftime("%Y-%m-%dT%H:%M:%S")
-                    if pub:
-                        try:
-                            utc_dt2 = datetime.fromisoformat(pub.replace("Z", "+00:00"))
-                            bj_dt2 = utc_dt2.astimezone(timezone(timedelta(hours=8)))
-                            ft = bj_dt2.strftime("%Y-%m-%dT%H:%M:%S")
-                        except (ValueError, TypeError):
-                            pass
-                    blocks.append(
-                        f'<div class="timeline-item " data-full-time="{ft}">'
-                        f'<div class="timeline-time">{t}</div>'
-                        f'<article class="timeline-card">'
-                        f'<div data-item-id="{item_id}">'
-                        f'<div class="timeline-card-head">'
-                        f'<div class="timeline-head-left">'
-                        f'<span class="timeline-source">{source}</span>'
-                        f'</div>'
-                        f'<div class="timeline-head-right">'
-                        f'<span class="timeline-score">{score}</span>'
-                        f'</div></div>'
-                        f'<div class="timeline-card-body">'
-                        f'<a class="timeline-title" href="{item_url}">{title}</a>'
-                        f'<p class="timeline-summary">{summary}</p>'
-                        f'</div></div></article></div>'
-                    )
-                if blocks:
-                    html_text = f'<html><body>{page_date}{"".join(blocks)}</body></html>'
+        print(f"  ⚠ 检测到 JS 反爬挑战，尝试 curl_cffi 绕过...")
+        try:
+            from curl_cffi import requests as curl_requests
+            resp2 = curl_requests.get(
+                url, headers=headers,
+                impersonate="chrome120",
+                timeout=60
+            )
+            if resp2.status_code == 200 and "timeline-item" in resp2.text:
+                html_text = resp2.text
+                print(f"  ✅ curl_cffi 绕过成功，长度: {len(html_text)}")
+            else:
+                print(f"  ⚠ curl_cffi 返回 {resp2.status_code}，仍使用原始响应")
+        except ImportError:
+            print(f"  ⚠ curl_cffi 未安装，跳过")
+        except Exception as e:
+            print(f"  ⚠ curl_cffi 异常: {e}")
     return html_text
 
 
